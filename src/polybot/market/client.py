@@ -126,6 +126,7 @@ class PaperMarketClient:
             groups = complete_set_targets_from_gamma_events(
                 self._gamma_events(),
                 self.config.max_complete_set_events,
+                max_outcomes=self.config.max_complete_set_outcomes,
             )
         logger.info(
             "discover binaries=%s complete_set_events=%s (cap %s/%s)",

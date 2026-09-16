@@ -48,6 +48,7 @@ class PaperConfig:
     clob_pages: int = 2
     include_gamma: bool = True
     max_complete_set_events: int = 10
+    max_complete_set_outcomes: int = 12
     size_probe_steps: int = 8
     summary_every_cycles: int = 1
 
@@ -136,6 +137,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         clob_pages=max(1, int(scan.get("clob_pages", 2))),
         include_gamma=bool(scan.get("include_gamma", True)),
         max_complete_set_events=max(0, int(scan.get("max_complete_set_events", 10))),
+        max_complete_set_outcomes=max(3, int(scan.get("max_complete_set_outcomes", 12))),
         size_probe_steps=max(3, int(scan.get("size_probe_steps", 8))),
         summary_every_cycles=max(1, int(scan.get("summary_every_cycles", 1))),
     )

@@ -19,6 +19,7 @@ scan:
   clob_pages: 2
   include_gamma: true
   max_complete_set_events: 10
+  max_complete_set_outcomes: 12
   size_probe_steps: 8
   summary_every_cycles: 1
   # Optional explicit condition IDs. Empty = discover via CLOB/Gamma.

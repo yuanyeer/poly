@@ -92,7 +92,11 @@ def binary_targets(condition_ids: Iterable[str], questions: dict[str, str] | Non
     return targets
 
 
-def complete_set_targets_from_gamma_events(events: Any, limit: int) -> list[ScanTarget]:
+def complete_set_targets_from_gamma_events(
+    events: Any,
+    limit: int,
+    max_outcomes: int = 12,
+) -> list[ScanTarget]:
     if not isinstance(events, list):
         return []
     targets: list[ScanTarget] = []
@@ -102,6 +106,9 @@ def complete_set_targets_from_gamma_events(events: Any, limit: int) -> list[Scan
         if not isinstance(event, dict):
             continue
         if event.get("closed") is True or event.get("active") is False:
+            continue
+        # Neg-risk events are the mutually exclusive exhaustive complete sets.
+        if event.get("enableNegRisk") is not True:
             continue
         markets = event.get("markets") or []
         if not isinstance(markets, list):
@@ -115,8 +122,8 @@ def complete_set_targets_from_gamma_events(events: Any, limit: int) -> list[Scan
             cid = condition_id_from_row(market)
             if cid:
                 condition_ids.append(cid)
-        # Mutually exclusive exhaustive set: 3+ live markets on one event.
-        if len(condition_ids) < 3:
+        # Skip huge fields (e.g. 100+ nominee markets) — subsetting would omit outcomes.
+        if len(condition_ids) < 3 or len(condition_ids) > max_outcomes:
             continue
         event_id = str(event.get("id") or event.get("slug") or condition_ids[0])
         title = str(event.get("title") or event.get("ticker") or event_id)

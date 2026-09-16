@@ -43,6 +43,7 @@ def test_complete_set_from_event_with_three_markets():
             "title": "Who wins?",
             "active": True,
             "closed": False,
+            "enableNegRisk": True,
             "markets": [
                 {"conditionId": "0x1", "acceptingOrders": True},
                 {"conditionId": "0x2", "acceptingOrders": True},
@@ -50,8 +51,19 @@ def test_complete_set_from_event_with_three_markets():
             ],
         },
         {
+            "id": "99",
+            "title": "sports props",
+            "enableNegRisk": False,
+            "markets": [
+                {"conditionId": "0xa", "acceptingOrders": True},
+                {"conditionId": "0xb", "acceptingOrders": True},
+                {"conditionId": "0xc", "acceptingOrders": True},
+            ],
+        },
+        {
             "id": "1",
             "title": "binary only",
+            "enableNegRisk": True,
             "markets": [
                 {"conditionId": "0x9", "acceptingOrders": True},
                 {"conditionId": "0x8", "acceptingOrders": True},
@@ -63,6 +75,12 @@ def test_complete_set_from_event_with_three_markets():
     assert targets[0].kind == "complete_set"
     assert targets[0].event_id == "event:42"
     assert targets[0].condition_ids == ("0x1", "0x2", "0x3")
+
+
+def test_complete_set_skips_oversized_neg_risk_event():
+    markets = [{"conditionId": f"0x{i}", "acceptingOrders": True} for i in range(20)]
+    events = [{"id": "big", "title": "huge field", "enableNegRisk": True, "markets": markets}]
+    assert complete_set_targets_from_gamma_events(events, limit=5, max_outcomes=12) == []
 
 
 def test_binary_targets_dedupe():
