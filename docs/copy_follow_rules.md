@@ -4,21 +4,25 @@
 >
 > Copy-trading is **entirely off**: watchlist, copy ledgers (`copy-<leader>` /
 > `copy:<leader>`), mirror fills, and stop-follow / rescan are **paused**.
-> Playbook is being distilled separately. Do **not** treat this file as an
-> allowed strategy type until **poly金融** re-opens it.
+> Distilled inventory rules live in
+> [`whiskas_inventory_rules.md`](whiskas_inventory_rules.md) — that is
+> **not** a copy-follow re-open. Do **not** treat this file as an allowed
+> strategy type.
 >
-> **Current allow list:** lock arb (YES+NO / complete-set) + maker spread only.
-> **Race:** **`whiskas-inv`** inventory ledger (start **2300**; no invented
-> target). **`arb-main` booking is paused.** Historical lock-arb lines below
-> (1000 → 2000, REVIEW 900 / HARD 750) apply only if arb booking is re-opened.
-> 24h paper. Lock-arb floors unchanged (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢).
-> Whiskas rules: [`whiskas_inventory_rules.md`](whiskas_inventory_rules.md).
+> **Current allow list:** lock arb (YES+NO / complete-set) + maker spread +
+> **`whiskas_inventory`** (paper, ledger **`whiskas-inv`**). This file is
+> **not** that type.
+> **Race:** **`whiskas-inv`**, start **2300**, per-round cap **1200**.
+> REVIEW **10% / equity < 2070**. HARD **25% / equity < 1725**.
+> **`arb-main` booking paused** (read-only scan OK). Lock-arb floors unchanged
+> (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢).
 >
 > This file is kept for history. Do not delete it. Struck entries below are
 > **not** live.
 
 Allowed strategy type ~~added~~ **removed** by poly金融. Lock arb (YES+NO /
-complete-set) and maker rules unchanged and remain the only allowed types.
+complete-set) and maker rules unchanged. **`whiskas_inventory`** is a
+separate frozen paper type — not a copy-follow re-open.
 
 ## Watchlist (priority) — **PAUSED / DISABLED**
 
@@ -52,8 +56,9 @@ Each watchlist leader **had** one independent paper ledger starting at
 **1000 USD**. Those copy ledgers are **paused**. There is **no** live copy
 sleeve. No cross-ledger cash, positions, exposure, or PnL sharing.
 
-Race **now:** **`main_arb` only**. Start **1000**, first to **2000** wins.
-Rank by equity / `distance_to_2000`. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
+Race **now:** **`whiskas-inv`** (allow-list `whiskas_inventory`), start
+**2300**, per-round cap **1200**. **`arb-main` booking paused** (read-only
+scan OK). See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
 
 Historical per-copy-ledger risk (paused; not live):
 - Per trade notional ≤ 25% of that ledger's cash
@@ -64,7 +69,8 @@ Historical per-copy-ledger risk (paused; not live):
 - HARD: peak dd ≥ 25% OR equity < **750** → SKIP that ledger only
 - Paper only; no live orders; no hand-edited ledger
 
-`main_arb` still uses REVIEW **10% / <900** and HARD **25% / <750**.
+`whiskas-inv` uses REVIEW **10% / <2070** and HARD **25% / <1725**.
+`arb-main` booking is paused.
 
 ## Stop-follow & rescan — **DISABLED**
 
@@ -82,7 +88,7 @@ Default is continuous **24h** / **00:00–24:00 ET**. `booked=0` escalate is
 calendar continuous 24h.
 
 ~~Copy ledgers may scan continuously to mirror 24h leaders.~~ Copy ledgers
-and watchlist are **paused**. Race is **`whiskas-inv`**; `arb-main` booking is paused.
+and watchlist are **paused**. `whiskas-inv` is the only racing ledger.
 
 ## Forbidden
 
