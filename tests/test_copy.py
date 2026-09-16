@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from polybot import COPY_MAX_CHASE, COPY_MAX_SLEEVE_PCT, COPY_STOP_PATH_DD, COPY_STOP_PEAK_DD
 from polybot.config import ConfigError, CopyConfig, load_config
 from polybot.copy.executor import MirrorExecutor, MirrorIntent, chase_slippage
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, LeaderMetrics
@@ -61,6 +62,32 @@ def _intent(**kwargs) -> MirrorIntent:
     )
     values.update(kwargs)
     return MirrorIntent(**values)
+
+
+def test_copy_follow_rules_v1_encoded_in_config():
+    """Pin config + constants to docs/copy_follow_rules.md (算法 v1)."""
+    assert COPY_MAX_CHASE == "0.01"
+    assert COPY_MAX_SLEEVE_PCT == "0.30"
+    assert COPY_STOP_PEAK_DD == "0.05"
+    assert COPY_STOP_PATH_DD == "0.05"
+    cfg = load_config("config/paper.yaml")
+    assert cfg.session_timezone == "America/New_York"
+    assert cfg.session_start == "08:00"
+    assert cfg.session_end == "23:00"
+    assert cfg.session_start < cfg.session_end
+    copy = cfg.copy
+    assert copy is not None
+    assert copy.max_chase_slippage == Decimal(COPY_MAX_CHASE)
+    assert copy.max_sleeve_pct == Decimal("0.30")
+    assert copy.stop_peak_dd == Decimal("0.05")
+    assert copy.stop_path_dd == Decimal("0.05")
+    assert copy.month_pnl_below == Decimal("0")
+    assert [leader.id for leader in copy.leaders] == [
+        "x-MoneyForWhiskas",
+        "0xcd30457c79",
+        "goldfisherrr",
+    ]
+    assert copy.leaders[0].primary is True
 
 
 def test_watchlist_loads_from_paper_config():
