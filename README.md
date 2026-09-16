@@ -112,7 +112,7 @@ src/polybot/
   copy/                    # 历史 stub（watchlist / monitor / mirror）；非 ops 路径
   ledger/                  # 追加式 paper 账本
   market/                  # CLOB 只读客户端、盘口 walk、fd 费率
-  strategy/                # yes_no_lock / complete_set / maker_spread
+  strategy/                # yes_no_lock / complete_set / maker_spread / whiskas_inventory
   risk/                    # 仓位与禁止项
   runner/                  # poly-paper CLI
 tests/

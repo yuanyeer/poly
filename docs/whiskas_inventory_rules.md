@@ -10,7 +10,7 @@
 > [`copy_follow_rules.md`](copy_follow_rules.md) and
 > [`copy_trading.md`](copy_trading.md)).
 
-Source: public trade tape reverse-engineer of x-MoneyForWhiskas on Polymarket BTC 5m Up/Down. Not his public config. Not copy-splitting into two directional legs.
+Source: public trade tape reverse-engineer of x-MoneyForWhiskas on Polymarket BTC 5m Up/Down. Not his public config. Not copy-splitting into two directional legs. Runtime knobs: `config/paper.yaml` → `whiskas`.
 
 ## Intent
 Inventory / pairing: buy BOTH Up and Down each BTC 5m round. Pairing (~80–90% of shares) cushions; profit mainly from residual (~9–17%). NOT the "80¢ one-shot lead-side" play.
@@ -50,3 +50,4 @@ Inventory / pairing: buy BOTH Up and Down each BTC 5m round. Pairing (~80–90% 
 
 ## Status
 FROZEN — allow-list `whiskas_inventory`, ledger `whiskas-inv` (main race). Paper only. Not copy-follow.
+Paper runtime is implemented (`config/paper.yaml` → `whiskas`; `copy.enabled` stays false). Knobs match this freeze.

@@ -8,6 +8,8 @@ from statistics import median
 from polybot.config import PaperConfig
 from polybot.types import LedgerFill, LedgerState, MedianEdgeKind
 
+_UNSET = object()
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -190,6 +192,17 @@ def distance_to_target(state: LedgerState, target) -> Decimal:
     return Decimal(str(target)) - state.equity
 
 
+def distance_field(state: LedgerState, target: Decimal | None) -> str:
+    """Keep distance-to-target style. No invented target → distance_to_start."""
+    if target is None:
+        return f"distance_to_start={state.starting_balance - state.equity:.4f}"
+    goal = Decimal(str(target))
+    label = "distance_to_2000" if goal == Decimal("2000") else (
+        f"distance_to_{int(goal)}" if goal == goal.to_integral_value() else "distance_to_target"
+    )
+    return f"{label}={goal - state.equity:.4f}"
+
+
 def _fmt_edge(value: Decimal | None) -> str:
     return f"{value:.4f}" if value is not None else "n/a"
 
@@ -206,29 +219,34 @@ def format_summary(
     drawdown_halt: bool = False,
     account_id: str | None = None,
     paused: bool = False,
+    target_balance: Decimal | None | object = _UNSET,
+    round_cap: Decimal | None = None,
 ) -> str:
     window_fills = fills if fills is not None else state.fills
     pnl = state.equity - state.starting_balance
     pnl_pct = (pnl / state.starting_balance) * Decimal("100") if state.starting_balance else Decimal("0")
-    progress = (state.equity / config.target_balance) * Decimal("100")
+    goal = config.target_balance if target_balance is _UNSET else target_balance
+    progress = (state.equity / goal) * Decimal("100") if goal else Decimal("0")
     win = win_rate(window_fills)
     win_txt = f"{win:.1f}%" if win is not None else "n/a"
     dd = Decimal("0") if drawdown is None else drawdown
     kind_txt = stats.median_net_edge_kind or "n/a"
     acct = f" account={account_id}" if account_id else ""
+    cap_txt = f" round_cap={round_cap:.4f}" if round_cap is not None else ""
+    target_txt = f"target={goal} ({progress:.2f}%)" if goal is not None else "target=n/a"
     return (
         f"{label}{acct} cycles={stats.cycles} scanned={stats.scanned} "
         f"candidates={stats.candidates} screened_n={stats.screened_n} booked={stats.booked} "
         f"rejected_edge={stats.rejected_edges} rejected_risk={stats.rejected_risk} "
         f"cash={state.cash:.4f} equity={state.equity:.4f} "
         f"pnl={pnl:+.4f} ({pnl_pct:+.2f}%) "
-        f"distance_to_2000={distance_to_target(state, config.target_balance):.4f} "
+        f"{distance_field(state, goal)} "
         f"below_floor_n={stats.below_floor_n} median_net_edge={_fmt_edge(stats.median_net_edge)} "
         f"median_net_edge_kind={kind_txt} "
         f"best_binary={_fmt_edge(stats.best_binary)} best_set={_fmt_edge(stats.best_set)} "
         f"win_rate={win_txt} "
         f"open={state.open_count}/{config.max_concurrent_open} "
-        f"exposure={state.open_exposure:.4f} target={config.target_balance} ({progress:.2f}%) "
+        f"exposure={state.open_exposure:.4f} {target_txt}{cap_txt} "
         f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)} "
         f"paused={int(paused)}"
     )
@@ -243,16 +261,25 @@ def format_daily(
     drawdown_halt: bool = False,
     account_id: str | None = None,
     paused: bool = False,
+    target_balance: Decimal | None | object = _UNSET,
+    round_cap: Decimal | None = None,
 ) -> str:
     win_txt = f"{snapshot.win_rate:.1f}%" if snapshot.win_rate is not None else "n/a"
     kind_txt = snapshot.median_net_edge_kind or "n/a"
     dd = Decimal("0") if drawdown is None else drawdown
-    distance = config.target_balance - snapshot.equity
+    goal = config.target_balance if target_balance is _UNSET else target_balance
+    fake = LedgerState(
+        starting_balance=snapshot.equity - snapshot.pnl,
+        cash=snapshot.cash,
+        locked_payout=snapshot.equity - snapshot.cash,
+        open_count=snapshot.open_count,
+    )
     acct = f" account={account_id}" if account_id else ""
+    cap_txt = f" round_cap={round_cap:.4f}" if round_cap is not None else ""
     return (
         f"DAILY {snapshot.date}{acct} fills={snapshot.fills} "
         f"cash={snapshot.cash:.4f} equity={snapshot.equity:.4f} "
-        f"pnl={snapshot.pnl:+.4f} distance_to_2000={distance:.4f} "
+        f"pnl={snapshot.pnl:+.4f} {distance_field(fake, goal)}{cap_txt} "
         f"locked_edge={snapshot.locked_edge:+.4f} "
         f"win_rate={win_txt} open={snapshot.open_count}/{config.max_concurrent_open} "
         f"exposure={snapshot.open_exposure:.4f} booked_notional={snapshot.booked_notional:.4f} "
@@ -268,19 +295,31 @@ def format_daily(
 def format_rank_lines(
     rows: list[tuple[int, str, LedgerState]],
     target,
+    targets: dict[str, Decimal | None] | None = None,
 ) -> list[str]:
     lines: list[str] = []
-    goal = Decimal(str(target))
+    winners: list[str] = []
     for rank, account_id, state in rows:
+        goal = targets.get(account_id) if targets is not None else (Decimal(str(target)) if target is not None else None)
+        pnl = state.equity - state.starting_balance
+        if goal is None:
+            lines.append(
+                f"RANK {rank} account={account_id} equity={state.equity:.4f} "
+                f"pnl={pnl:+.4f} {distance_field(state, None)}"
+            )
+            continue
         progress = (state.equity / goal) * Decimal("100") if goal else Decimal("0")
         lines.append(
             f"RANK {rank} account={account_id} equity={state.equity:.4f} "
-            f"progress={progress:.2f}% distance_to_2000={goal - state.equity:.4f}"
+            f"progress={progress:.2f}% {distance_field(state, goal)}"
         )
-    winners = [account_id for _rank, account_id, state in rows if state.equity >= goal]
+        if state.equity >= goal:
+            winners.append(account_id)
     if winners:
+        first = winners[0]
+        goal = targets.get(first) if targets is not None else target
         lines.append(
-            f"WINNER account={winners[0]} target={goal} "
+            f"WINNER account={first} target={goal} "
             f"(first to target; report only; no fabricated fills)"
         )
     return lines

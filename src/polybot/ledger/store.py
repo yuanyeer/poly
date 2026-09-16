@@ -12,7 +12,9 @@ from polybot.types import LedgerFill, LedgerState, Leg, Opportunity
 
 GENESIS_TYPE = "genesis"
 FILL_TYPE = "fill"
+REDEEM_TYPE = "redeem"
 ZERO_HASH = "0" * 64
+WHISKAS_STRATEGY = "whiskas_inventory"
 
 
 class LedgerError(RuntimeError):
@@ -133,20 +135,49 @@ class PaperLedger:
         locked = Decimal("0")
         event_exposure: dict[str, Decimal] = {}
         fills: list[LedgerFill] = []
+        redeemed: set[str] = set()
+        inventory: dict[str, dict[str, Decimal]] = {}
+        open_lock_fills = 0
         for record in records:
-            if record.get("type") != FILL_TYPE:
+            kind = record.get("type")
+            if kind not in {FILL_TYPE, REDEEM_TYPE}:
                 continue
             fill = self._fill_from_record(record)
+            fills.append(fill)
             cash -= fill.cash_debit
             cash += fill.cash_credit
+            if kind == REDEEM_TYPE or "redeem" in fill.notes:
+                redeemed.add(fill.event_id)
+                continue
+            if fill.strategy == WHISKAS_STRATEGY:
+                bucket = inventory.setdefault(
+                    fill.event_id, {"Up": Decimal("0"), "Down": Decimal("0"), "debit": Decimal("0")}
+                )
+                bucket["debit"] += fill.cash_debit
+                for leg in fill.legs:
+                    if leg.side != "BUY":
+                        continue
+                    label = "Up" if str(leg.outcome).lower().startswith("up") else (
+                        "Down" if str(leg.outcome).lower().startswith("down") else ""
+                    )
+                    if label:
+                        bucket[label] += leg.size
+                continue
             locked += fill.expected_payout
             event_exposure[fill.event_id] = event_exposure.get(fill.event_id, Decimal("0")) + fill.cash_debit
-            fills.append(fill)
+            open_lock_fills += 1
+        open_events = 0
+        for event_id, bucket in inventory.items():
+            if event_id in redeemed:
+                continue
+            locked += min(bucket["Up"], bucket["Down"])
+            event_exposure[event_id] = event_exposure.get(event_id, Decimal("0")) + bucket["debit"]
+            open_events += 1
         return LedgerState(
             starting_balance=self.starting_balance,
             cash=cash,
             locked_payout=locked,
-            open_count=len(fills),
+            open_count=open_lock_fills + open_events,
             event_exposure=event_exposure,
             fills=fills,
         )
@@ -171,11 +202,88 @@ class PaperLedger:
             hash=str(record.get("hash", "")),
         )
 
+    def round_notional(self, event_id: str) -> Decimal:
+        spent = Decimal("0")
+        redeemed = False
+        for fill in self.state().fills:
+            if fill.event_id != event_id:
+                continue
+            if fill.strategy == WHISKAS_STRATEGY and "redeem" in fill.notes:
+                redeemed = True
+            elif fill.strategy == WHISKAS_STRATEGY:
+                spent += fill.cash_debit
+        return Decimal("0") if redeemed else spent
+
+    def inventory_shares(self, event_id: str) -> dict[str, Decimal]:
+        up = Decimal("0")
+        down = Decimal("0")
+        redeemed = False
+        for fill in self.state().fills:
+            if fill.event_id != event_id:
+                continue
+            if fill.strategy == WHISKAS_STRATEGY and "redeem" in fill.notes:
+                redeemed = True
+                continue
+            if fill.strategy != WHISKAS_STRATEGY:
+                continue
+            for leg in fill.legs:
+                if leg.side != "BUY":
+                    continue
+                label = str(leg.outcome).lower()
+                if label.startswith("up"):
+                    up += leg.size
+                elif label.startswith("down"):
+                    down += leg.size
+        if redeemed:
+            return {"Up": Decimal("0"), "Down": Decimal("0")}
+        return {"Up": up, "Down": down}
+
+    def append_redemption(
+        self,
+        *,
+        event_id: str,
+        winner: str,
+        cash_credit: Decimal,
+        question: str = "",
+        notes: str = "redeem",
+    ) -> LedgerFill:
+        records = self.verify()
+        for record in records:
+            if record.get("type") == REDEEM_TYPE and record.get("event_id") == event_id:
+                raise LedgerError(f"duplicate redemption {event_id}")
+        prev_hash = str(records[-1]["hash"])
+        fill_id = uuid.uuid4().hex
+        body: dict[str, Any] = {
+            "type": REDEEM_TYPE,
+            "fill_id": fill_id,
+            "ts": _now(),
+            "opportunity_id": f"{WHISKAS_STRATEGY}:{event_id}:redeem",
+            "event_id": event_id,
+            "strategy": WHISKAS_STRATEGY,
+            "question": question,
+            "size": "0",
+            "edge": "0",
+            "cash_debit": "0",
+            "cash_credit": str(cash_credit),
+            "expected_payout": "0",
+            "legs": [],
+            "notes": notes if "redeem" in notes else f"redeem:{notes}",
+        }
+        record = {**body, "prev_hash": prev_hash, "hash": _hash_record(prev_hash, body)}
+        with self.path.open("a", encoding="utf-8") as fh:
+            fh.write(_dumps(record) + "\n")
+        return self._fill_from_record(record)
+
     def append_fill(self, opportunity: Opportunity) -> LedgerFill:
         records = self.verify()
         prev_hash = str(records[-1]["hash"])
-        if any(r.get("type") == FILL_TYPE and r.get("opportunity_id") == opportunity.opportunity_id for r in records):
+        if any(
+            r.get("type") in {FILL_TYPE, REDEEM_TYPE} and r.get("opportunity_id") == opportunity.opportunity_id
+            for r in records
+        ):
             raise LedgerError(f"duplicate opportunity {opportunity.opportunity_id}")
+        if any(leg.side == "SELL" for leg in opportunity.legs):
+            raise LedgerError("mid-round sells are forbidden")
 
         fill_id = uuid.uuid4().hex
         body: dict[str, Any] = {

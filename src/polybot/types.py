@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from typing import Literal
 
 Role = Literal["taker", "maker"]
 Side = Literal["BUY", "SELL"]
-StrategyName = Literal["yes_no_lock", "complete_set", "maker_spread"]
+StrategyName = Literal["yes_no_lock", "complete_set", "maker_spread", "whiskas_inventory"]
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,11 @@ class MarketSnapshot:
     outcomes: tuple[OutcomeBook, ...]
     min_order_size: Decimal
     kind: str = "binary"
+    slug: str = ""
+    round_open: datetime | None = None
+    round_end: datetime | None = None
+    resolved: bool = False
+    winner: str | None = None
 
 
 MedianEdgeKind = Literal["raw", "walked"]
@@ -76,6 +82,11 @@ class ScanTarget:
     condition_ids: tuple[str, ...]
     token_ids: tuple[str, ...] = ()
     raw_edge: Decimal | None = None
+    slug: str = ""
+    round_open: datetime | None = None
+    round_end: datetime | None = None
+    resolved: bool = False
+    winner: str | None = None
 
 
 @dataclass(frozen=True)
@@ -115,9 +126,12 @@ class Opportunity:
     expected_payout: Decimal
     legs: tuple[Leg, ...]
     notes: str = ""
+    clip_id: str = ""
 
     @property
     def opportunity_id(self) -> str:
+        if self.clip_id:
+            return f"{self.strategy}:{self.event_id}:{self.clip_id}"
         tokens = ",".join(sorted(leg.token_id for leg in self.legs))
         return f"{self.strategy}:{self.event_id}:{tokens}"
 

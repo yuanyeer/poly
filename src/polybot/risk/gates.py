@@ -17,7 +17,39 @@ class RiskEngine:
         self.config = config
 
     def evaluate(self, opportunity: Opportunity, state: LedgerState) -> RiskDecision:
+        if opportunity.strategy == "whiskas_inventory":
+            return self.evaluate_whiskas(opportunity, state)
         reasons = list(self._hard_rejects(opportunity, state))
+        if reasons:
+            return RiskDecision(allowed=False, reason="; ".join(reasons))
+        return RiskDecision(allowed=True, reason="ok", capped_size=opportunity.size)
+
+    def evaluate_whiskas(self, opportunity: Opportunity, state: LedgerState) -> RiskDecision:
+        whiskas = self.config.whiskas
+        reasons: list[str] = []
+        if whiskas is None or not whiskas.enabled:
+            return RiskDecision(allowed=False, reason="whiskas inventory disabled")
+        if any(leg.side == "SELL" for leg in opportunity.legs):
+            reasons.append("forbidden: mid-round sell")
+        if not opportunity.legs:
+            reasons.append("no legs")
+        if opportunity.notional > state.cash:
+            reasons.append("notional exceeds cash")
+        spent = state.event_exposure.get(opportunity.event_id, ZERO)
+        if spent + opportunity.notional > whiskas.per_round_notional_cap:
+            reasons.append(
+                f"per-round notional {spent + opportunity.notional} > cap {whiskas.per_round_notional_cap}"
+            )
+        prices: list[Decimal] = []
+        for leg in opportunity.legs:
+            if leg.levels_used < 1:
+                reasons.append("forbidden: fill ignored book depth")
+            if leg.price > whiskas.max_buy_price:
+                reasons.append(f"buy price {leg.price} > max {whiskas.max_buy_price}")
+            if leg.side == "BUY":
+                prices.append(leg.price)
+        if len(prices) >= 2 and sum(prices) > whiskas.combo_sum_cap:
+            reasons.append(f"combo {sum(prices)} > cap {whiskas.combo_sum_cap}")
         if reasons:
             return RiskDecision(allowed=False, reason="; ".join(reasons))
         return RiskDecision(allowed=True, reason="ok", capped_size=opportunity.size)

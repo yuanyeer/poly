@@ -24,6 +24,17 @@ from polybot import (
     STARTING_BALANCE_USD,
     TAKER_EDGE_FLOOR,
     TARGET_BALANCE_USD,
+    WHISKAS_ACCOUNT_ID,
+    WHISKAS_CLIP_SIZE,
+    WHISKAS_COMBO_SUM_CAP,
+    WHISKAS_DRAWDOWN_HALT_FLOOR_USD,
+    WHISKAS_DRAWDOWN_REVIEW_FLOOR_USD,
+    WHISKAS_ENTER_AFTER_OPEN_SECONDS,
+    WHISKAS_MAX_BUY_PRICE,
+    WHISKAS_PER_ROUND_NOTIONAL_CAP_USD,
+    WHISKAS_ROUND_SECONDS,
+    WHISKAS_STARTING_BALANCE_USD,
+    WHISKAS_STOP_REMAINING_SECONDS,
 )
 
 
@@ -56,6 +67,35 @@ class CopyConfig:
     leaders: tuple[CopyLeaderConfig, ...] = ()
     metrics_stub: Path | None = None
     source_path: Path | None = None
+
+
+@dataclass(frozen=True)
+class WhiskasConfig:
+    """Paper-only BTC 5m Up/Down inventory. Not copy-follow. No live orders."""
+
+    enabled: bool = False
+    account_id: str = WHISKAS_ACCOUNT_ID
+    starting_balance: Decimal = Decimal(WHISKAS_STARTING_BALANCE_USD)
+    # None = do not invent a race target; report pnl / equity / caps.
+    target_balance: Decimal | None = None
+    ledger_path: Path | None = None
+    clip_size: Decimal = Decimal(WHISKAS_CLIP_SIZE)
+    enter_after_open_seconds: float = float(WHISKAS_ENTER_AFTER_OPEN_SECONDS)
+    stop_remaining_seconds: float = float(WHISKAS_STOP_REMAINING_SECONDS)
+    max_buy_price: Decimal = Decimal(WHISKAS_MAX_BUY_PRICE)
+    combo_sum_cap: Decimal = Decimal(WHISKAS_COMBO_SUM_CAP)
+    per_round_notional_cap: Decimal = Decimal(WHISKAS_PER_ROUND_NOTIONAL_CAP_USD)
+    round_seconds: float = float(WHISKAS_ROUND_SECONDS)
+    pause_arb_main_booking: bool = True
+    drawdown_review_pct: Decimal = Decimal("0.10")
+    drawdown_review_floor_usd: Decimal = Decimal(WHISKAS_DRAWDOWN_REVIEW_FLOOR_USD)
+    drawdown_halt_pct: Decimal = Decimal("0.25")
+    drawdown_halt_floor_usd: Decimal = Decimal(WHISKAS_DRAWDOWN_HALT_FLOOR_USD)
+    question_needles: tuple[str, ...] = ("bitcoin", "btc")
+    updown_needles: tuple[str, ...] = ("up or down", "up/down", "updown")
+    interval_needles: tuple[str, ...] = ("5m", "5-min", "5 min", "5-minute", "5 minute")
+    outcome_up: tuple[str, ...] = ("up", "yes")
+    outcome_down: tuple[str, ...] = ("down", "no")
 
 
 @dataclass(frozen=True)
@@ -104,6 +144,8 @@ class PaperConfig:
     drawdown_halt_pct: Decimal = Decimal("0.25")
     drawdown_halt_floor_usd: Decimal = Decimal(DRAWDOWN_HALT_FLOOR_USD)
     copy: CopyConfig | None = None
+    whiskas: WhiskasConfig | None = None
+    race_primary_account: str = "arb-main"
 
 
 def _d(value: Any) -> Decimal:
@@ -183,6 +225,8 @@ def _enforce_floors(cfg: PaperConfig) -> None:
     _enforce_session(cfg)
     if cfg.copy is not None:
         _enforce_copy(cfg.copy)
+    if cfg.whiskas is not None:
+        _enforce_whiskas(cfg.whiskas)
 
 
 def _enforce_copy(copy: CopyConfig) -> None:
@@ -298,9 +342,106 @@ def _load_copy(raw: dict[str, Any], paper_path: Path) -> CopyConfig | None:
     return parse_copy_config(nested, source_path=source)
 
 
+def _as_str_tuple(raw: Any, default: tuple[str, ...]) -> tuple[str, ...]:
+    if not raw:
+        return default
+    if not isinstance(raw, list):
+        raise ConfigError("whiskas needle lists must be YAML lists")
+    values = tuple(str(item).strip().lower() for item in raw if str(item).strip())
+    return values or default
+
+
+def parse_whiskas_config(raw: dict[str, Any], *, paper_path: Path) -> WhiskasConfig:
+    market = raw.get("market") or {}
+    if market and not isinstance(market, dict):
+        raise ConfigError("whiskas market must be a mapping")
+    target_raw = raw.get("target_balance_usd")
+    ledger_raw = raw.get("ledger_path")
+    if ledger_raw:
+        candidate = Path(str(ledger_raw))
+        ledger_path = candidate if candidate.is_absolute() else Path.cwd() / candidate
+    else:
+        ledger_path = Path("data/whiskas-inv.jsonl")
+    return WhiskasConfig(
+        enabled=bool(raw.get("enabled", False)),
+        account_id=str(raw.get("account_id") or WHISKAS_ACCOUNT_ID).strip(),
+        starting_balance=_d(raw.get("starting_balance_usd", WHISKAS_STARTING_BALANCE_USD)),
+        target_balance=_d(target_raw) if target_raw not in (None, "") else None,
+        ledger_path=ledger_path,
+        clip_size=_d(raw.get("clip_size", WHISKAS_CLIP_SIZE)),
+        enter_after_open_seconds=float(raw.get("enter_after_open_seconds", WHISKAS_ENTER_AFTER_OPEN_SECONDS)),
+        stop_remaining_seconds=float(raw.get("stop_remaining_seconds", WHISKAS_STOP_REMAINING_SECONDS)),
+        max_buy_price=_d(raw.get("max_buy_price", WHISKAS_MAX_BUY_PRICE)),
+        combo_sum_cap=_d(raw.get("combo_sum_cap", WHISKAS_COMBO_SUM_CAP)),
+        per_round_notional_cap=_d(raw.get("per_round_notional_cap_usd", WHISKAS_PER_ROUND_NOTIONAL_CAP_USD)),
+        round_seconds=float(raw.get("round_seconds", WHISKAS_ROUND_SECONDS)),
+        pause_arb_main_booking=bool(raw.get("pause_arb_main_booking", True)),
+        drawdown_review_pct=_d(raw.get("drawdown_review_pct", "0.10")),
+        drawdown_review_floor_usd=_d(raw.get("drawdown_review_floor_usd", WHISKAS_DRAWDOWN_REVIEW_FLOOR_USD)),
+        drawdown_halt_pct=_d(raw.get("drawdown_halt_pct", "0.25")),
+        drawdown_halt_floor_usd=_d(raw.get("drawdown_halt_floor_usd", WHISKAS_DRAWDOWN_HALT_FLOOR_USD)),
+        question_needles=_as_str_tuple(market.get("question_needles"), ("bitcoin", "btc")),
+        updown_needles=_as_str_tuple(market.get("updown_needles"), ("up or down", "up/down", "updown")),
+        interval_needles=_as_str_tuple(
+            market.get("interval_needles"), ("5m", "5-min", "5 min", "5-minute", "5 minute")
+        ),
+        outcome_up=_as_str_tuple(market.get("outcome_up"), ("up", "yes")),
+        outcome_down=_as_str_tuple(market.get("outcome_down"), ("down", "no")),
+    )
+
+
+def _load_whiskas(raw: dict[str, Any], paper_path: Path) -> WhiskasConfig | None:
+    section = raw.get("whiskas")
+    if not section:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigError("whiskas must be a mapping")
+    return parse_whiskas_config(section, paper_path=paper_path)
+
+
+def _enforce_whiskas(whiskas: WhiskasConfig) -> None:
+    if not whiskas.account_id.strip():
+        raise ConfigError("whiskas account_id is required")
+    if whiskas.starting_balance <= 0:
+        raise ConfigError("whiskas starting_balance must be > 0")
+    if whiskas.target_balance is not None and whiskas.target_balance <= whiskas.starting_balance:
+        raise ConfigError("whiskas target_balance must exceed starting_balance when set")
+    if whiskas.clip_size <= 0:
+        raise ConfigError("whiskas clip_size must be > 0")
+    if whiskas.enter_after_open_seconds < 0:
+        raise ConfigError("whiskas enter_after_open_seconds cannot be negative")
+    if whiskas.stop_remaining_seconds < 0:
+        raise ConfigError("whiskas stop_remaining_seconds cannot be negative")
+    if whiskas.max_buy_price <= 0 or whiskas.max_buy_price > 1:
+        raise ConfigError("whiskas max_buy_price must be in (0, 1]")
+    if whiskas.combo_sum_cap <= 0:
+        raise ConfigError("whiskas combo_sum_cap must be > 0")
+    if whiskas.per_round_notional_cap <= 0:
+        raise ConfigError("whiskas per_round_notional_cap must be > 0")
+    if whiskas.round_seconds <= 0:
+        raise ConfigError("whiskas round_seconds must be > 0")
+    if whiskas.drawdown_review_pct <= 0 or whiskas.drawdown_review_pct > 1:
+        raise ConfigError("whiskas drawdown_review_pct must be in (0, 1]")
+    if whiskas.drawdown_halt_pct <= 0 or whiskas.drawdown_halt_pct > 1:
+        raise ConfigError("whiskas drawdown_halt_pct must be in (0, 1]")
+    if whiskas.drawdown_review_pct > whiskas.drawdown_halt_pct:
+        raise ConfigError("whiskas drawdown_review_pct cannot exceed drawdown_halt_pct")
+    if whiskas.drawdown_review_floor_usd <= 0:
+        raise ConfigError("whiskas drawdown_review_floor_usd must be > 0")
+    if whiskas.drawdown_halt_floor_usd <= 0:
+        raise ConfigError("whiskas drawdown_halt_floor_usd must be > 0")
+    if whiskas.drawdown_halt_floor_usd >= whiskas.drawdown_review_floor_usd:
+        raise ConfigError("whiskas halt floor must be below review floor")
+
+
 def copy_runtime_enabled(copy: CopyConfig | None) -> bool:
     """True only when copy modules may run. False skips watchlist, copy ledgers, and MirrorExecutor."""
     return copy is not None and copy.enabled
+
+
+def whiskas_runtime_enabled(whiskas: WhiskasConfig | None) -> bool:
+    """True when the paper inventory path may book on whiskas-inv."""
+    return whiskas is not None and whiskas.enabled
 
 
 def load_config(path: str | Path | None = None) -> PaperConfig:
@@ -321,6 +462,11 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
     risk = raw.get("risk") or {}
     fees = raw.get("fees") or {}
     session = raw.get("session") or {}
+    race = raw.get("race") or {}
+    whiskas = _load_whiskas(raw, config_path)
+    race_primary = str(race.get("primary_account") or "").strip()
+    if not race_primary:
+        race_primary = whiskas.account_id if whiskas_runtime_enabled(whiskas) else "arb-main"
 
     ledger_path = Path(os.environ.get("POLY_LEDGER_PATH") or ledger.get("path") or "data/paper_ledger.jsonl")
     clob_host = os.environ.get("POLY_CLOB_HOST") or endpoints.get("clob_host") or "https://clob.polymarket.com"
@@ -366,6 +512,8 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         drawdown_halt_pct=_d(session.get("drawdown_halt_pct", "0.25")),
         drawdown_halt_floor_usd=_d(session.get("drawdown_halt_floor_usd", DRAWDOWN_HALT_FLOOR_USD)),
         copy=_load_copy(raw, config_path),
+        whiskas=whiskas,
+        race_primary_account=race_primary,
     )
     _enforce_floors(cfg)
     if cfg.poll_interval_seconds < 5:
