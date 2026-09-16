@@ -56,6 +56,10 @@ min_fill_size: 1
 # booked=0 streak = in-window cycles only. Overnight idle (end→next start)
 # does NOT count — this is not a wall-clock 24h meter.
 # Drawdown: live ledger equity vs peak on every cycle, including off-hours.
+# Two tiers — do not collapse (ops questions poly金融):
+#   escalate / strategy-review: peak DD ≥ 10% OR balance < 180
+#   hard halt protection only: peak DD ≥ 25% (stops trading; does not replace 10%/180)
+# booked=0 escalate still uses cumulative NY 09:00–22:00 window time only.
 session:
   enabled: true
   timezone: America/New_York

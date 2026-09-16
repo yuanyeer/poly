@@ -62,9 +62,11 @@ class PaperConfig:
     # Overnight idle between end and next start does not increment it.
     # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
     idle_zero_fill_sessions: int = 2
-    # Live ledger equity vs peak, every cycle including off-hours.
+    # Hard halt protection only (default 25%). Does not replace the
+    # escalate / strategy-review line (peak DD ≥ 10% OR balance < 180).
     drawdown_halt_pct: Decimal = Decimal("0.25")
-    # Ops hard floor from the merged docs note (PR #3).
+    # Escalate floor (ops questions poly金融): balance < 180. Not a substitute
+    # for the 10% peak-drawdown escalate line, and not the 25% hard halt.
     drawdown_hard_floor_usd: Decimal = Decimal("180")
 
 
