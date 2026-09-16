@@ -3,10 +3,11 @@
 
 mode: paper
 
+# Finance freeze: each ledger starts 1000; first to 2000 wins (report only).
 ledger:
-  starting_balance_usd: 200
-  target_balance_usd: 1000
-  path: data/paper_ledger.jsonl
+  starting_balance_usd: 1000
+  target_balance_usd: 2000
+  path: data/paper_ledger.jsonl  # arb-main; copy ledgers are siblings copy-<leader>.jsonl
 
 endpoints:
   clob_host: https://clob.polymarket.com
@@ -46,32 +47,24 @@ fees:
 
 min_fill_size: 1
 
-# FINAL trading window from poly 负责人.
-# Local wall clock in America/New_York; ZoneInfo honors DST (EST/EDT).
-# timezone / start / end are YAML-only — edit here, no code change.
-# (A later Shanghai 10:00–23:00 draft was cancelled; do not hardcode it.)
-# Weekends use the same hours. Start is inclusive; scanning stops at end.
-# Outside [start, end) --loop idles with SKIP session_closed (no scan).
-# Not 24h trading.
-# booked=0 streak = in-window cycles only. Overnight idle (end→next start)
-# does NOT count — this is not a wall-clock 24h meter.
-# Drawdown: live ledger equity vs peak on every cycle, including off-hours.
-# Two tiers — do not collapse (ask poly金融):
-#   escalate / REVIEW: peak DD ≥ 10% OR equity < 180 — continue scanning; do NOT hard-stop
-#   hard halt / SKIP: peak DD ≥ 25% OR equity < 150 — stops trading
-#   150 is intentionally below 180 so the floors do not collide
-# booked=0 escalate still uses cumulative NY 08:00–23:00 window time only.
+# 24h / 00:00–24:00 ET (ops frozen). No ET session gate.
+# session.enabled: false — --loop may scan 24h. Do not reintroduce an ET window.
+# booked=0 escalate is wall-clock / calendar continuous 24h.
+# Drawdown: live ledger equity vs peak on every cycle. Per-ledger.
+# Two tiers — do not collapse (finance freeze / PR #10):
+#   escalate / REVIEW: peak DD ≥ 10% OR equity < 900 — continue scanning; do NOT hard-stop
+#   hard halt / SKIP: peak DD ≥ 25% OR equity < 750 — SKIP that ledger only
+#   750 is intentionally below 900 so the floors do not collide
 session:
-  enabled: true
-  timezone: America/New_York
-  start: "08:00"
-  end: "23:00"
-  idle_zero_fill_sessions: 2
+  enabled: false
+  idle_zero_fill_hours: 24
   drawdown_review_pct: 0.10
-  drawdown_review_floor_usd: 180
+  drawdown_review_floor_usd: 900
   drawdown_halt_pct: 0.25
-  drawdown_halt_floor_usd: 150
+  drawdown_halt_floor_usd: 750
 
+# Multi-ledger competition (isolated): arb-main + one copy ledger per watchlist
+# leader. Cash / exposure / concurrent / sleeve / REVIEW / HARD are per-ledger.
 # Copy-trading observation (paper-only hooks). YES+NO / complete-set arb unchanged.
 # Watchlist, stop-follow, and sleeve limits live in the referenced file.
 # Loader rejects a sleeve above 30% or loosened stop-follow thresholds.

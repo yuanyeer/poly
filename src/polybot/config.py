@@ -14,6 +14,8 @@ from polybot import (
     COPY_MAX_SLEEVE_PCT,
     COPY_STOP_PATH_DD,
     COPY_STOP_PEAK_DD,
+    DRAWDOWN_HALT_FLOOR_USD,
+    DRAWDOWN_REVIEW_FLOOR_USD,
     MAKER_EDGE_FLOOR,
     MAX_CONCURRENT_OPEN,
     MAX_SAME_EVENT_EXPOSURE_PCT,
@@ -83,23 +85,21 @@ class PaperConfig:
     size_probe_steps: int = 8
     summary_every_cycles: int = 1
     skip_walk_if_raw_below_floor: bool = True
-    # FINAL default from poly 负责人: America/New_York 08:00–23:00 local (DST).
-    # Not 24h. Outside the window the loop must not scan.
-    session_enabled: bool = True
+    # 24h / 00:00–24:00 ET. Gate off; unused start/end are not an 08:00–23:00 window.
+    session_enabled: bool = False
     session_timezone: str = "America/New_York"
-    session_start: str = "08:00"
-    session_end: str = "23:00"
-    # booked=0 streak counts only in-window cycles (not wall-clock 24h).
-    # Overnight idle between end and next start does not increment it.
-    # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
-    idle_zero_fill_sessions: int = 2
-    # Two-tier ops (ask poly金融):
-    # REVIEW = peak DD ≥ 10% OR equity < 180 (keep scanning; 180 never SKIPs alone).
-    # SKIP   = peak DD ≥ 25% OR equity < 150. 150 is below 180 so floors do not collide.
+    session_start: str = "00:00"
+    session_end: str = "00:00"
+    # booked=0 escalate is wall-clock continuous hours (default 24), not session-window accrual.
+    idle_zero_fill_hours: float = 24.0
+    # Two-tier ops (ask poly金融). Pct lines stay 10% / 25% unless told otherwise.
+    # Absolute floors YAML-editable; finance freeze defaults 900 / 750.
+    # REVIEW = peak DD ≥ review_pct OR equity < review_floor — keep scanning.
+    # SKIP   = peak DD ≥ halt_pct OR equity < halt_floor. Halt floor must be below review.
     drawdown_review_pct: Decimal = Decimal("0.10")
-    drawdown_review_floor_usd: Decimal = Decimal("180")
+    drawdown_review_floor_usd: Decimal = Decimal(DRAWDOWN_REVIEW_FLOOR_USD)
     drawdown_halt_pct: Decimal = Decimal("0.25")
-    drawdown_halt_floor_usd: Decimal = Decimal("150")
+    drawdown_halt_floor_usd: Decimal = Decimal(DRAWDOWN_HALT_FLOOR_USD)
     copy: CopyConfig | None = None
 
 
@@ -133,7 +133,7 @@ def _enforce_session(cfg: PaperConfig) -> None:
     start = tuple(int(x) for x in cfg.session_start.split(":"))
     end = tuple(int(x) for x in cfg.session_end.split(":"))
     if cfg.session_enabled and start >= end:
-        raise ConfigError("session window must be a same-day interval (start < end); 24h trading is disabled")
+        raise ConfigError("session window must be a same-day interval (start < end) when the optional gate is enabled")
 
 
 def _require_mode(raw: dict[str, Any]) -> None:
@@ -145,14 +145,10 @@ def _require_mode(raw: dict[str, Any]) -> None:
 
 
 def _enforce_floors(cfg: PaperConfig) -> None:
-    if cfg.starting_balance != _d(STARTING_BALANCE_USD):
-        raise ConfigError(
-            f"starting_balance must be {STARTING_BALANCE_USD} USD (got {cfg.starting_balance})"
-        )
-    if cfg.target_balance != _d(TARGET_BALANCE_USD):
-        raise ConfigError(
-            f"target_balance is a report-only milestone and must stay {TARGET_BALANCE_USD}"
-        )
+    if cfg.starting_balance <= 0:
+        raise ConfigError("starting_balance must be > 0")
+    if cfg.target_balance <= cfg.starting_balance:
+        raise ConfigError("target_balance must exceed starting_balance")
     if cfg.taker_edge_floor < _d(TAKER_EDGE_FLOOR):
         raise ConfigError(f"taker_edge_floor cannot be below {TAKER_EDGE_FLOOR}")
     if cfg.maker_edge_floor < _d(MAKER_EDGE_FLOOR):
@@ -167,8 +163,8 @@ def _enforce_floors(cfg: PaperConfig) -> None:
         raise ConfigError(f"max_concurrent_open cannot exceed {MAX_CONCURRENT_OPEN}")
     if cfg.max_unhedged_inventory < 0:
         raise ConfigError("max_unhedged_inventory cannot be negative")
-    if cfg.idle_zero_fill_sessions < 1:
-        raise ConfigError("idle_zero_fill_sessions must be >= 1")
+    if cfg.idle_zero_fill_hours <= 0:
+        raise ConfigError("idle_zero_fill_hours must be > 0")
     if cfg.drawdown_review_pct <= 0 or cfg.drawdown_review_pct > 1:
         raise ConfigError("drawdown_review_pct must be in (0, 1]")
     if cfg.drawdown_halt_pct <= 0 or cfg.drawdown_halt_pct > 1:
@@ -180,7 +176,7 @@ def _enforce_floors(cfg: PaperConfig) -> None:
     if cfg.drawdown_halt_floor_usd <= 0:
         raise ConfigError("drawdown_halt_floor_usd must be > 0")
     if cfg.drawdown_halt_floor_usd >= cfg.drawdown_review_floor_usd:
-        raise ConfigError("drawdown_halt_floor_usd must be below drawdown_review_floor_usd (180 is review-only)")
+        raise ConfigError("drawdown_halt_floor_usd must be below drawdown_review_floor_usd (review floor is review-only)")
     _enforce_session(cfg)
     if cfg.copy is not None:
         _enforce_copy(cfg.copy)
@@ -351,15 +347,15 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         size_probe_steps=max(3, int(scan.get("size_probe_steps", 8))),
         summary_every_cycles=max(1, int(scan.get("summary_every_cycles", 1))),
         skip_walk_if_raw_below_floor=bool(scan.get("skip_walk_if_raw_below_floor", True)),
-        session_enabled=bool(session.get("enabled", True)),
+        session_enabled=bool(session.get("enabled", False)),
         session_timezone=str(session.get("timezone") or "America/New_York"),
-        session_start=str(session.get("start") or "08:00"),
-        session_end=str(session.get("end") or "23:00"),
-        idle_zero_fill_sessions=max(1, int(session.get("idle_zero_fill_sessions", 2))),
+        session_start=str(session.get("start") or "00:00"),
+        session_end=str(session.get("end") or "00:00"),
+        idle_zero_fill_hours=float(session.get("idle_zero_fill_hours", 24)),
         drawdown_review_pct=_d(session.get("drawdown_review_pct", "0.10")),
-        drawdown_review_floor_usd=_d(session.get("drawdown_review_floor_usd", "180")),
+        drawdown_review_floor_usd=_d(session.get("drawdown_review_floor_usd", DRAWDOWN_REVIEW_FLOOR_USD)),
         drawdown_halt_pct=_d(session.get("drawdown_halt_pct", "0.25")),
-        drawdown_halt_floor_usd=_d(session.get("drawdown_halt_floor_usd", "150")),
+        drawdown_halt_floor_usd=_d(session.get("drawdown_halt_floor_usd", DRAWDOWN_HALT_FLOOR_USD)),
         copy=_load_copy(raw, config_path),
     )
     _enforce_floors(cfg)

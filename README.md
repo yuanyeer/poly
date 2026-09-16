@@ -1,6 +1,6 @@
 # poly
 
-Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。起始资金 **200 USD**，里程碑 **1000 USD**（只用于报告，不会伪造成交去凑数）。
+Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。每本独立账本起始 **1000 USD**，先到 **2000 USD** 获胜（只用于报告，不会伪造成交去凑数）。
 
 本仓库**不会**在 paper 模式向 CLOB 发送真实订单。
 
@@ -12,7 +12,7 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 | 按盘口逐档 walk 计算可成交均价与滑点 | 把最优一档数量当成全部可成交量 |
 | 使用 `fd.r` / `fd.to` 计算 taker 费（maker 在 `fd.to=true` 时为 0） | 手改账本余额 |
 | 本地 JSONL 追加成交，余额由成交回放得出 | 单边方向性下注、跨事件无对冲叙事单 |
-| 风控：单笔 ≤ 资金 25%、同事件 ≤ 40%、同时未平仓机会 ≤ 3 | 为了冲 1000 USD 而虚增成交 |
+| 风控：单笔 ≤ 该账本资金 25%、同事件 ≤ 40%、同时未平仓机会 ≤ 3 | 为了冲 2000 USD 而虚增成交 |
 
 ## 策略（结构已实现，含真实 edge 公式）
 
@@ -75,7 +75,7 @@ python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.j
 
 持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：按 `ledger_id` 拆分 fills、cash、equity、pnl、`distance_to_2000`、win_rate、open exposure、`below_floor_n`、`median_net_edge`、review/halt）。
 
-**24h 交易已冻结（ops）。** 不再要求 America/New_York 08:00–23:00 时段门；默认连续 **24h** / **00:00–24:00 ET**。`booked=0` escalate 按**日历连续 24h** 计（已无 off-hours）。Copy 账本可连续扫描以镜像全日领单（优先 `x-MoneyForWhiskas`）。多账本赛跑回撤（每本账本）：10% 或权益低于 **900** 打 `REVIEW`（上报 finance，**该账本不停扫**）；25% 或权益低于 **750** 才对该账本 `SKIP drawdown_halt`。900 不是硬停地板。现行 `config/paper.yaml` 仍写着 08:00–23:00，**以本文档为准**，留给 fullstack 去掉 ET gate：
+**24h 交易已冻结（ops）。** 不再要求 America/New_York 08:00–23:00 时段门；默认连续 **24h** / **00:00–24:00 ET**。`config/paper.yaml` 为 `session.enabled: false`，**没有** 08:00–23:00。`booked=0` escalate 按**日历连续 24h** 计（已无 off-hours）。Copy 账本可连续扫描以镜像全日领单（优先 `x-MoneyForWhiskas`）。多账本赛跑回撤（每本账本）：10% 或权益低于 **900** 打 `REVIEW`（上报 finance，**该账本不停扫**）；25% 或权益低于 **750** 才对该账本 `SKIP drawdown_halt`。900 不是硬停地板。
 
 ```bash
 poly-paper --loop
@@ -85,7 +85,7 @@ poly-paper --loop
 
 配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型见 `docs/copy_follow_rules.md`。多账本赛跑（每本 **1000 → 2000**）见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)。
 
-账本是 `data/paper_ledger.jsonl`：只追加、带哈希链。没有 `set_balance`。余额 = 200 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
+账本是 `data/paper_ledger.jsonl`（arb-main）以及同目录 `copy-<leader>.jsonl`：只追加、带哈希链。没有 `set_balance`。每本账本余额 = 1000 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
 
 ## 测试
 

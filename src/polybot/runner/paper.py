@@ -9,13 +9,20 @@ from typing import Callable
 
 from polybot.config import PaperConfig
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, MetricsProvider
-from polybot.copy.monitor import CopyEvent, CopyMonitor
+from polybot.copy.monitor import EVENT_STOP_FOLLOW, CopyEvent, CopyMonitor
 from polybot.copy.watchlist import Watchlist, load_watchlist
+from polybot.ledger.accounts import ARB_MAIN_ID, AccountBook, open_account_book
 from polybot.ledger.store import PaperLedger
 from polybot.market.client import LiveOrderForbidden, PaperMarketClient
 from polybot.risk.drawdown import DrawdownDecision, classify_drawdown
-from polybot.risk.gates import RiskEngine
-from polybot.runner.summary import SessionStats, build_daily_snapshot, format_daily, format_summary, utc_now
+from polybot.runner.summary import (
+    SessionStats,
+    build_daily_snapshot,
+    format_daily,
+    format_rank_lines,
+    format_summary,
+    utc_now,
+)
 from polybot.session import in_trading_window, local_now, session_label
 from polybot.strategy import default_strategies
 from polybot.strategy.sizer import resize_to_book
@@ -56,26 +63,24 @@ class CycleReport:
     drawdown_review: bool = False
     drawdown_halt: bool = False
     copy_events: tuple[str, ...] = ()
+    rank_lines: tuple[str, ...] = ()
+    winner: str | None = None
 
 
 @dataclass
 class SessionWatch:
-    """Team metric: booked=0 streak is in-window only (not wall-clock 24h).
+    """Wall-clock booked=0 streak + live peak/drawdown. 24h trading.
 
-    Overnight idle (session end → next start) must not increment zero_book_cycles
-    or zero_fill_sessions. Drawdown is live ledger equity vs peak every cycle.
-    Escalate / REVIEW (ask poly金融): peak DD ≥ 10% OR equity < 180 —
-    continue scanning; do NOT hard-stop.
-    Hard halt / SKIP: peak DD ≥ 25% OR equity < 150. 150 is intentionally
-    below 180 so the floors do not collide.
+    TRIGGER idle_zero_fill after continuous wall-clock idle_zero_fill_hours
+    (default 24) of booked=0. Not session-window accrual.
+    REVIEW (finance freeze): peak DD ≥ 10% OR equity < 900 — keep scanning.
+    HARD: peak DD ≥ 25% OR equity < 750 — SKIP that ledger. Per-ledger.
     """
 
     peak_equity: Decimal = Decimal("0")
     zero_book_cycles: int = 0
     zero_fill_sessions: int = 0
-    session_booked: int = 0
-    session_scanned: bool = False
-    in_window_prev: bool = False
+    zero_since: datetime | None = None
 
     def observe_equity(self, equity: Decimal) -> Decimal:
         if equity > self.peak_equity:
@@ -84,30 +89,29 @@ class SessionWatch:
             return Decimal("0")
         return (self.peak_equity - equity) / self.peak_equity
 
-    def note_in_window(self, booked: int, did_scan: bool) -> None:
-        if did_scan:
-            self.session_scanned = True
-            self.session_booked += booked
-            if booked == 0:
-                self.zero_book_cycles += 1
-            else:
-                self.zero_book_cycles = 0
-                self.zero_fill_sessions = 0
-        self.in_window_prev = True
+    def idle_hours(self, now: datetime) -> float:
+        if self.zero_since is None:
+            return 0.0
+        current = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        start = self.zero_since if self.zero_since.tzinfo else self.zero_since.replace(tzinfo=timezone.utc)
+        return max(0.0, (current - start).total_seconds() / 3600.0)
 
-    def note_off_window(self, idle_sessions: int) -> bool:
-        """Close a session on in→out transition. Returns True if idle trigger fires."""
-        triggered = False
-        if self.in_window_prev:
-            if self.session_scanned and self.session_booked == 0:
-                self.zero_fill_sessions += 1
-                triggered = self.zero_fill_sessions >= idle_sessions
-            elif self.session_booked > 0:
-                self.zero_fill_sessions = 0
-            self.session_booked = 0
-            self.session_scanned = False
-        self.in_window_prev = False
-        return triggered
+    def note_booked(self, booked: int, now: datetime, idle_hours: float) -> bool:
+        """Record wall-clock booked=0. Returns True when continuous idle hours trip."""
+        current = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        if booked > 0:
+            self.zero_book_cycles = 0
+            self.zero_fill_sessions = 0
+            self.zero_since = None
+            return False
+        self.zero_book_cycles += 1
+        if self.zero_since is None:
+            self.zero_since = current
+            return False
+        tripped = self.idle_hours(current) >= float(idle_hours)
+        if tripped:
+            self.zero_fill_sessions = 1
+        return tripped
 
 
 class PaperRunner:
@@ -121,12 +125,19 @@ class PaperRunner:
         if config.mode != "paper":
             raise LiveOrderForbidden("runner only accepts paper mode")
         self.config = config
-        self.ledger = ledger or PaperLedger(config.ledger_path, config.starting_balance)
+        self.book: AccountBook = open_account_book(config, arb_ledger=ledger)
+        self.ledger = self.book.arb().ledger
         self.market = market or PaperMarketClient(config)
-        self.risk = RiskEngine(config)
+        self.risk = self.book.arb().risk
         self.strategies = default_strategies()
-        self.stats = SessionStats()
-        self.watch = SessionWatch()
+        self.account_stats: dict[str, SessionStats] = {
+            account.account_id: SessionStats() for account in self.book.accounts
+        }
+        self.watches: dict[str, SessionWatch] = {
+            account.account_id: SessionWatch() for account in self.book.accounts
+        }
+        self.stats = self.account_stats[ARB_MAIN_ID]
+        self.watch = self.watches[ARB_MAIN_ID]
         self._day_key: str | None = None
         self._now = now_fn or utc_now
         self.copy_watchlist: Watchlist | None = None
@@ -140,13 +151,27 @@ class PaperRunner:
             self.copy_watchlist = load_watchlist(config.copy)
             self.copy_monitor = CopyMonitor(config.copy, self.copy_watchlist, provider)
 
-    def status_line(self, state: LedgerState) -> str:
+    def status_line(self, state: LedgerState, account_id: str = ARB_MAIN_ID) -> str:
         progress = (state.equity / self.config.target_balance) * Decimal("100")
+        distance = self.config.target_balance - state.equity
         return (
-            f"cash={state.cash:.4f} locked={state.locked_payout:.4f} "
+            f"account={account_id} cash={state.cash:.4f} locked={state.locked_payout:.4f} "
             f"equity={state.equity:.4f} target={self.config.target_balance} "
-            f"({progress:.2f}%) open={state.open_count}/{self.config.max_concurrent_open} "
+            f"({progress:.2f}%) distance_to_2000={distance:.4f} "
+            f"open={state.open_count}/{self.config.max_concurrent_open} "
             f"exposure={state.open_exposure:.4f}"
+        )
+
+    def _account_dd(self, account_id: str, state: LedgerState) -> DrawdownDecision:
+        watch = self.watches[account_id]
+        watch.observe_equity(state.equity)
+        return classify_drawdown(
+            equity=state.equity,
+            peak=watch.peak_equity,
+            review_pct=self.config.drawdown_review_pct,
+            halt_pct=self.config.drawdown_halt_pct,
+            review_floor=self.config.drawdown_review_floor_usd,
+            halt_floor=self.config.drawdown_halt_floor_usd,
         )
 
     def run_forever(self, max_loops: int | None = None, once: bool = False) -> CycleReport:
@@ -169,19 +194,24 @@ class PaperRunner:
     def run_cycle(self) -> CycleReport:
         now = self._now()
         utc = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
-        self.stats.reset_daily_edges(utc.date().isoformat())
+        day_key = utc.date().isoformat()
+        for stats in self.account_stats.values():
+            stats.reset_daily_edges(day_key)
         state = self.ledger.state()
-        self.watch.observe_equity(state.equity)
-        dd = classify_drawdown(
-            equity=state.equity,
-            peak=self.watch.peak_equity,
-            review_pct=self.config.drawdown_review_pct,
-            halt_pct=self.config.drawdown_halt_pct,
-            review_floor=self.config.drawdown_review_floor_usd,
-            halt_floor=self.config.drawdown_halt_floor_usd,
-        )
-        messages = [self.status_line(state)]
-        self._log_drawdown(messages, state, dd)
+        dd = self._account_dd(ARB_MAIN_ID, state)
+        messages = [self.status_line(state, ARB_MAIN_ID)]
+        self._log_drawdown(messages, state, dd, account_id=ARB_MAIN_ID)
+        for account in self.book.copy_accounts():
+            other = account.state()
+            other_dd = self._account_dd(account.account_id, other)
+            messages.append(self.status_line(other, account.account_id))
+            self._log_drawdown(messages, other, other_dd, account_id=account.account_id)
+            if other_dd.halt and not account.paused:
+                account.paused = True
+                messages.append(
+                    f"SKIP drawdown_halt account={account.account_id} "
+                    f"(HARD; that copy ledger only)"
+                )
         copy_events = self._observe_copy(messages)
         in_window = in_trading_window(
             self.config.session_timezone,
@@ -198,7 +228,7 @@ class PaperRunner:
         local = local_now(self.config.session_timezone, now)
 
         if not in_window:
-            triggered = self.watch.note_off_window(self.config.idle_zero_fill_sessions)
+            triggered = self.watch.note_booked(0, now, self.config.idle_zero_fill_hours)
             reason = "session_closed"
             local_txt = local.strftime("%Y-%m-%d %H:%M")
             line = f"SKIP {reason} tz={self.config.session_timezone} local={local_txt} window={window} (no scan)"
@@ -206,8 +236,8 @@ class PaperRunner:
             logger.info(line)
             if triggered:
                 trig = (
-                    f"TRIGGER idle_zero_fill sessions={self.watch.zero_fill_sessions} "
-                    f"(booked=0 counted only inside {window})"
+                    f"TRIGGER idle_zero_fill hours={self.watch.idle_hours(now):.2f} "
+                    f"(wall-clock continuous booked=0; threshold={self.config.idle_zero_fill_hours})"
                 )
                 messages.append(trig)
                 logger.info(trig)
@@ -228,7 +258,7 @@ class PaperRunner:
             )
 
         if dd.halt:
-            self.watch.note_in_window(booked=0, did_scan=False)
+            self.watch.note_booked(0, now, self.config.idle_zero_fill_hours)
             return self._finish_cycle(
                 state=state,
                 messages=messages,
@@ -302,14 +332,22 @@ class PaperRunner:
             rejected_risk=rejected_risk,
             snapshot_failures=snapshot_failures,
         )
-        self.watch.note_in_window(booked=booked, did_scan=True)
+        triggered = self.watch.note_booked(booked, now, self.config.idle_zero_fill_hours)
         if booked == 0:
             idle = (
                 f"IDLE booked=0 streak_cycles={self.watch.zero_book_cycles} "
-                f"streak_sessions={self.watch.zero_fill_sessions} window={window}"
+                f"wall_clock_hours={self.watch.idle_hours(now):.2f} "
+                f"threshold={self.config.idle_zero_fill_hours}"
             )
             messages.append(idle)
             logger.info(idle)
+        if triggered:
+            trig = (
+                f"TRIGGER idle_zero_fill hours={self.watch.idle_hours(now):.2f} "
+                f"(wall-clock continuous booked=0; threshold={self.config.idle_zero_fill_hours})"
+            )
+            messages.append(trig)
+            logger.info(trig)
         state = self.ledger.state()
         self.watch.observe_equity(state.equity)
         after = classify_drawdown(
@@ -356,32 +394,43 @@ class PaperRunner:
             copy_events=(),
         )
 
-    def _log_drawdown(self, messages: list[str], state: LedgerState, dd: DrawdownDecision) -> None:
+    def _log_drawdown(
+        self,
+        messages: list[str],
+        state: LedgerState,
+        dd: DrawdownDecision,
+        *,
+        account_id: str = ARB_MAIN_ID,
+    ) -> None:
+        watch = self.watches[account_id]
         if dd.review:
             line = dd.review_line(
-                peak=self.watch.peak_equity,
+                peak=watch.peak_equity,
                 equity=state.equity,
                 review_pct=self.config.drawdown_review_pct,
                 review_floor=self.config.drawdown_review_floor_usd,
             )
+            line = f"{line} account={account_id}"
             messages.append(line)
             logger.warning(line)
         if dd.halt:
             line = dd.halt_line(
-                peak=self.watch.peak_equity,
+                peak=watch.peak_equity,
                 equity=state.equity,
                 halt_pct=self.config.drawdown_halt_pct,
                 halt_floor=self.config.drawdown_halt_floor_usd,
             )
+            line = f"{line} account={account_id}"
             messages.append(line)
             logger.error(line)
 
-    def _daily_snapshot(self, state: LedgerState, now: datetime):
+    def _daily_snapshot(self, state: LedgerState, now: datetime, *, stats: SessionStats | None = None):
+        tape = stats or self.stats
         return build_daily_snapshot(
             state,
             now,
-            below_floor_n=self.stats.below_floor_n,
-            median_net_edge=self.stats.median_net_edge,
+            below_floor_n=tape.below_floor_n,
+            median_net_edge=tape.median_net_edge,
         )
 
     def _finish_cycle(
@@ -401,35 +450,56 @@ class PaperRunner:
         drawdown: DrawdownDecision,
         copy_events: list[CopyEvent] | tuple[str, ...] | None = None,
     ) -> CycleReport:
-        messages.append(self.status_line(state))
-        summary = format_summary(
-            "SUMMARY",
-            self.config,
-            state,
-            self.stats,
-            drawdown=drawdown.drawdown,
-            drawdown_review=drawdown.review,
-            drawdown_halt=drawdown.halt,
-        )
-        daily_snap = self._daily_snapshot(state, now)
-        daily = format_daily(
-            daily_snap,
-            self.config,
-            drawdown=drawdown.drawdown,
-            drawdown_review=drawdown.review,
-            drawdown_halt=drawdown.halt,
-        )
+        messages.append(self.status_line(state, ARB_MAIN_ID))
+        summary = ""
+        daily = ""
+        daily_snap = self._daily_snapshot(state, now, stats=self.stats)
         day_key = daily_snap.date
         if self._day_key is None:
             self._day_key = day_key
         elif day_key != self._day_key:
             logger.info("DAILY close %s — rolling to %s", self._day_key, day_key)
             self._day_key = day_key
-        if self.stats.cycles % self.config.summary_every_cycles == 0 or skipped_reason:
-            messages.append(summary)
-            messages.append(daily)
-            logger.info(summary)
-            logger.info(daily)
+        rank_rows: list[tuple[int, str, LedgerState]] = []
+        emit = self.stats.cycles % self.config.summary_every_cycles == 0 or skipped_reason
+        for rank, account, acc_state in self.book.ranked():
+            rank_rows.append((rank, account.account_id, acc_state))
+            acc_stats = self.account_stats[account.account_id]
+            acc_dd = self._account_dd(account.account_id, acc_state)
+            acc_summary = format_summary(
+                "SUMMARY",
+                self.config,
+                acc_state,
+                acc_stats,
+                drawdown=acc_dd.drawdown,
+                drawdown_review=acc_dd.review,
+                drawdown_halt=acc_dd.halt,
+                account_id=account.account_id,
+                paused=account.paused,
+            )
+            acc_daily = format_daily(
+                self._daily_snapshot(acc_state, now, stats=acc_stats),
+                self.config,
+                drawdown=acc_dd.drawdown,
+                drawdown_review=acc_dd.review,
+                drawdown_halt=acc_dd.halt,
+                account_id=account.account_id,
+                paused=account.paused,
+            )
+            if account.account_id == ARB_MAIN_ID:
+                summary = acc_summary
+                daily = acc_daily
+            if emit:
+                messages.append(acc_summary)
+                messages.append(acc_daily)
+                logger.info(acc_summary)
+                logger.info(acc_daily)
+        rank_lines = tuple(format_rank_lines(rank_rows, self.config.target_balance))
+        winner = self.book.winner(self.config.target_balance)
+        if emit:
+            for line in rank_lines:
+                messages.append(line)
+                logger.info(line)
         return CycleReport(
             scanned=scanned,
             candidates=candidates,
@@ -450,6 +520,8 @@ class PaperRunner:
             drawdown_review=drawdown.review,
             drawdown_halt=drawdown.halt,
             copy_events=_copy_event_names(copy_events),
+            rank_lines=rank_lines,
+            winner=winner.account_id if winner is not None else None,
         )
 
     def _observe_copy(self, messages: list[str]) -> list[CopyEvent]:
@@ -458,6 +530,14 @@ class PaperRunner:
         events = self.copy_monitor.poll()
         for event in events:
             messages.append(event.line())
+            if event.name == EVENT_STOP_FOLLOW:
+                account = self.book.copy_for(event.leader_id)
+                if account is not None:
+                    account.paused = True
+                    messages.append(
+                        f"PAUSE account={account.account_id} leader={event.leader_id} "
+                        f"(other copy ledgers keep running)"
+                    )
         return events
 
     def _record_market_edge(self, snapshot: MarketSnapshot) -> None:

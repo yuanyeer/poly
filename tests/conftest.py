@@ -31,6 +31,9 @@ def paper_config(tmp_path: Path | None = None, **overrides: object) -> PaperConf
         min_fill_size=Decimal("1"),
         # Unit tests pin the clock themselves; disable the live NY gate by default.
         session_enabled=False,
+        # Production freeze is 900/750; unit fixtures keep 180/150 so start=200 still scans.
+        drawdown_review_floor_usd=Decimal("180"),
+        drawdown_halt_floor_usd=Decimal("150"),
     )
     values.update(overrides)
     if tmp_path is not None:

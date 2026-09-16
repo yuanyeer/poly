@@ -4,8 +4,11 @@
 Independent paper ledgers start at **1000 USD**. First ledger to **2000 USD** wins. Rank by equity / distance-to-2000.
 
 ## Ledgers
-1. **main_arb** — YES+NO / complete-set / maker strategies only
-2. **copy:<leader>** — one ledger per watchlist leader (e.g. `copy:x-MoneyForWhiskas`)
+Implemented ids: **arb-main** (docs freeze also called `main_arb`) and **copy-\<leader\>** (docs freeze also called `copy:<leader>`), e.g. `copy-x-MoneyForWhiskas`.
+1. **arb-main** — YES+NO / complete-set / maker strategies only
+2. **copy-\<leader\>** — one ledger per watchlist leader
+
+Watchlist priority: `x-MoneyForWhiskas` first (full-day / 24h), then `0xcd30457c79`, then `goldfisherrr`.
 
 No cross-ledger cash, positions, exposure, or PnL sharing.
 
@@ -28,4 +31,4 @@ No cross-ledger cash, positions, exposure, or PnL sharing.
 Lock-arb edge floors (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢) are unchanged.
 
 ## Reporting
-SUMMARY/DAILY must split by ledger_id: cash, equity, PnL, distance_to_2000, below_floor_n, median_net_edge, review/halt flags.
+`SUMMARY` / `DAILY` must split by account / ledger_id: cash, equity, PnL, `distance_to_2000`, `below_floor_n`, `median_net_edge`, review/halt flags, plus `RANK` / `WINNER` (report only; no fabricated fills).

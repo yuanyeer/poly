@@ -120,7 +120,7 @@ def can_open(balance, event_exposure, open_opps, notional, event_id):
 
 Implemented lock-arb paper ledger remains a single local JSONL; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
 
-**Multi-ledger race (docs freeze; not implemented here):** independent paper ledgers (`main_arb` + one `copy:<leader>` per watchlist leader) each start at **1000 USD**; first to **2000 USD** wins. No cross-ledger cash, positions, exposure, or PnL. Source: [`docs/multi_ledger_race.md`](multi_ledger_race.md). Lock-arb numeric floors above are unchanged.
+**Multi-ledger race:** independent paper ledgers (`arb-main` + one `copy-<leader>` per watchlist leader) each start at **1000 USD**; first to **2000 USD** wins. No cross-ledger cash, positions, exposure, or PnL. Source: [`docs/multi_ledger_race.md`](multi_ledger_race.md). Lock-arb numeric floors above are unchanged.
 
 ## 旁注 / ops note (clocks & kill triggers)
 
@@ -135,14 +135,13 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
    - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 900**. **Continue scanning that ledger; do NOT hard-stop.** This is the review gate only. 900 must never hard-stop alone.
    - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 750**. **SKIP that ledger only.** **750 is intentionally below 900** so the review floor and the halt floor do not collide. The 25% / 750 halt does **not** replace the 10% / 900 REVIEW line.
 
-## Trading session (ops frozen; code follow-up)
+## Trading session (ops frozen; implemented)
 
-**24h trading is frozen.** There is **no ET session gate**. Equivalent explicit window: **America/New_York 00:00–24:00** (continuous). `zoneinfo` still honors DST if a clock label is needed; hours themselves do not close the scanner.
+**24h trading is frozen.** There is **no ET session gate**. Equivalent: **24h / 00:00–24:00 ET**. `config/paper.yaml` sets `session.enabled: false` and does **not** encode 08:00–23:00.
 
-- `poly-paper --loop` must keep scanning around the clock (no `SKIP session_closed` for night / weekend ET hours).
+- `poly-paper --loop` keeps scanning around the clock (no `SKIP session_closed` for night / weekend ET hours).
 - `booked=0` **escalate** is **calendar continuous 24h**. Overnight and former “off-window” idle **do** count. After ~24h of continuous `booked=0`, log `TRIGGER idle_zero_fill`.
 - Copy ledgers may scan continuously so they can mirror 24h leaders. Primary: `x-MoneyForWhiskas` (full-day activity).
-- Current `config/paper.yaml` still encodes `08:00–23:00` and the loader still rejects a 24h interval. **Docs here supersede that YAML.** Fullstack should drop the ET gate (disable it, or set an explicit 24h / 00:00–24:00 window).
 - Drawdown watches **that ledger's equity vs its own peak** on every cycle (`(peak − equity) / peak`). Two tiers — do not collapse; apply **per ledger**:
   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **900**. **Continue scanning that ledger; do NOT hard-stop.**
   - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **750**. `SKIP drawdown_halt` **that ledger only**. **750 is intentionally below 900** so the floors do not collide.

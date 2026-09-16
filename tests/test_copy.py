@@ -6,8 +6,14 @@ from pathlib import Path
 import pytest
 import yaml
 
+from polybot import COPY_MAX_CHASE, COPY_MAX_SLEEVE_PCT, COPY_STOP_PATH_DD, COPY_STOP_PEAK_DD
 from polybot.config import ConfigError, CopyConfig, load_config
-from polybot.copy.executor import MirrorExecutor, MirrorIntent, chase_slippage
+from polybot.copy.executor import (
+    MirrorExecutor,
+    MirrorIntent,
+    chase_slippage,
+    validate_v1_mirror_chase,
+)
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, LeaderMetrics
 from polybot.copy.monitor import EVENT_RESCAN_NEEDED, EVENT_STOP_FOLLOW, CopyMonitor, stop_follow_reason
 from polybot.copy.rescan import LoggingRescanHook, RescanCriteria, filter_candidates
@@ -61,6 +67,30 @@ def _intent(**kwargs) -> MirrorIntent:
     )
     values.update(kwargs)
     return MirrorIntent(**values)
+
+
+def test_copy_follow_rules_v1_encoded_in_config():
+    """Pin config + constants to docs/copy_follow_rules.md (算法 v1)."""
+    assert COPY_MAX_CHASE == "0.01"
+    assert COPY_MAX_SLEEVE_PCT == "0.30"
+    assert COPY_STOP_PEAK_DD == "0.05"
+    assert COPY_STOP_PATH_DD == "0.05"
+    cfg = load_config("config/paper.yaml")
+    assert cfg.session_enabled is False
+    assert cfg.idle_zero_fill_hours == 24
+    copy = cfg.copy
+    assert copy is not None
+    assert copy.max_chase_slippage == Decimal(COPY_MAX_CHASE)
+    assert copy.max_sleeve_pct == Decimal("0.30")
+    assert copy.stop_peak_dd == Decimal("0.05")
+    assert copy.stop_path_dd == Decimal("0.05")
+    assert copy.month_pnl_below == Decimal("0")
+    assert [leader.id for leader in copy.leaders] == [
+        "x-MoneyForWhiskas",
+        "0xcd30457c79",
+        "goldfisherrr",
+    ]
+    assert copy.leaders[0].primary is True
 
 
 def test_watchlist_loads_from_paper_config():
@@ -303,6 +333,31 @@ def test_mirror_still_respects_same_event_and_concurrent():
     assert "concurrent" in concurrent.reason
 
 
+def test_v1_validator_requires_delay_walk_fee_then_abandons_over_one_cent():
+    """after delay Δt, walk book; fill_px=VWAP; fee per fd; >1¢ → abandon, no copy."""
+    ready = _intent(
+        delay_seconds=Decimal("2"),
+        depth_walked=True,
+        fees_applied=True,
+        leader_px=Decimal("0.50"),
+        fill_px=Decimal("0.50"),
+        fee_per_share=Decimal("0.001"),
+    )
+    assert validate_v1_mirror_chase(ready) is None
+    assert validate_v1_mirror_chase(_intent(delay_seconds=None)) is not None
+    assert validate_v1_mirror_chase(_intent(depth_walked=False)) is not None
+    assert validate_v1_mirror_chase(_intent(fees_applied=False)) is not None
+    # |0.51 − 0.50| + 0.002 = 0.012 > 0.01 → abandon
+    over = _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.51"), fee_per_share=Decimal("0.002"))
+    reason = validate_v1_mirror_chase(over)
+    assert reason is not None
+    assert "abandon" in reason
+    assert "do not copy" in reason
+    # Exactly 1¢ is still copyable
+    at_cap = _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.505"), fee_per_share=Decimal("0.005"))
+    assert validate_v1_mirror_chase(at_cap) is None
+
+
 def test_chase_slippage_formula():
     assert chase_slippage(Decimal("0.50"), Decimal("0.50"), Decimal("0.01")) == Decimal("0.01")
     assert chase_slippage(Decimal("0.52"), Decimal("0.50"), Decimal("0.002")) == Decimal("0.022")
@@ -398,3 +453,7 @@ def test_paper_runner_emits_stop_follow_from_json_stub(tmp_path: Path):
     assert runner.copy_watchlist is not None
     assert runner.copy_watchlist.by_id("x-MoneyForWhiskas").active is False
     assert runner.ledger.state().fills == []
+    paused = runner.book.copy_for("x-MoneyForWhiskas")
+    other = runner.book.copy_for("goldfisherrr")
+    assert paused is not None and paused.paused is True
+    assert other is not None and other.paused is False

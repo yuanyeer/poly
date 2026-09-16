@@ -1,6 +1,8 @@
 # Paper-only copy-trading observation. Referenced from config/paper.yaml.
+# Encodes poly 算法 v1: docs/copy_follow_rules.md.
 # No live orders. No fabricated fills. Display names are config keys until
 # wallet address mapping is resolved (TODO).
+# 负责人 CONFIRMED 24h trading. Paper loop may scan 24h; no ET session gate.
 
 enabled: true
 
