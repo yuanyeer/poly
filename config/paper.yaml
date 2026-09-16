@@ -1,0 +1,39 @@
+# Hard constraints for paper mode. The loader rejects any attempt to loosen
+# position caps or edge floors below the values encoded here and in code.
+
+mode: paper
+
+ledger:
+  starting_balance_usd: 200
+  target_balance_usd: 1000
+  path: data/paper_ledger.jsonl
+
+endpoints:
+  clob_host: https://clob.polymarket.com
+  gamma_host: https://gamma-api.polymarket.com
+  chain_id: 137
+
+scan:
+  max_markets: 12
+  poll_interval_seconds: 15
+  # Optional explicit condition IDs. Empty = discover via CLOB/Gamma.
+  condition_ids: []
+
+edge:
+  # Net edge after fees, per share (price units).
+  taker_floor: 0.005   # 0.5¢
+  maker_floor: 0.002   # 0.2¢
+
+risk:
+  max_trade_notional_pct: 0.25
+  max_same_event_exposure_pct: 0.40
+  max_concurrent_open: 3
+  # Maker residual unhedged notional allowed (USD). 0 = full hedge required.
+  max_unhedged_inventory_usd: 0
+
+fees:
+  # fd.to is source of truth. When true, makers pay 0.
+  # taker fee(p) = size * r * p * (1-p)
+  assume_taker_only_if_fd_missing: true
+
+min_fill_size: 1
