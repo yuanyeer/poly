@@ -166,50 +166,42 @@ def test_idle_zero_fill_trigger_after_two_sessions(tmp_path):
     assert any("TRIGGER idle_zero_fill" in line for line in second_close.messages)
 
 
-def test_classify_review_is_not_silent_halt():
-    mid = classify_drawdown(
-        equity=Decimal("200"),
-        peak=Decimal("250"),
+def _dd(**kwargs):
+    values = dict(
         review_pct=Decimal("0.10"),
         halt_pct=Decimal("0.25"),
-        hard_floor=Decimal("180"),
+        review_floor=Decimal("180"),
+        halt_floor=Decimal("150"),
     )
+    values.update(kwargs)
+    return classify_drawdown(**values)
+
+
+def test_classify_review_is_not_silent_halt():
+    mid = _dd(equity=Decimal("200"), peak=Decimal("250"))
     assert mid.drawdown == Decimal("0.2")
     assert mid.review is True
     assert mid.halt is False
-    assert mid.below_floor is False
 
-    halt = classify_drawdown(
-        equity=Decimal("200"),
-        peak=Decimal("400"),
-        review_pct=Decimal("0.10"),
-        halt_pct=Decimal("0.25"),
-        hard_floor=Decimal("180"),
-    )
+    halt = _dd(equity=Decimal("200"), peak=Decimal("400"))
     assert halt.review is True
     assert halt.halt is True
 
-    floor = classify_drawdown(
-        equity=Decimal("179"),
-        peak=Decimal("200"),
-        review_pct=Decimal("0.10"),
-        halt_pct=Decimal("0.25"),
-        hard_floor=Decimal("180"),
-    )
-    assert floor.below_floor is True
-    assert floor.review is True
-    assert floor.halt is True
+    below_180 = _dd(equity=Decimal("179"), peak=Decimal("200"))
+    assert below_180.below_review_floor is True
+    assert below_180.review is True
+    assert below_180.halt is False  # 180 is review-only; 179 is not < 150
+    assert below_180.below_halt_floor is False
 
-    exact_floor = classify_drawdown(
-        equity=Decimal("180"),
-        peak=Decimal("200"),
-        review_pct=Decimal("0.10"),
-        halt_pct=Decimal("0.25"),
-        hard_floor=Decimal("180"),
-    )
-    assert exact_floor.review is True  # 10% from peak
-    assert exact_floor.halt is False  # 180 is not below the floor
-    assert exact_floor.below_floor is False
+    exact_180 = _dd(equity=Decimal("180"), peak=Decimal("200"))
+    assert exact_180.review is True  # 10% from peak
+    assert exact_180.halt is False
+    assert exact_180.below_review_floor is False
+
+    below_150 = _dd(equity=Decimal("149"), peak=Decimal("200"))
+    assert below_150.below_halt_floor is True
+    assert below_150.review is True
+    assert below_150.halt is True
 
 
 def test_review_10pct_keeps_scanning(tmp_path):
@@ -217,8 +209,9 @@ def test_review_10pct_keeps_scanning(tmp_path):
         tmp_path,
         session_enabled=False,
         drawdown_review_pct=Decimal("0.10"),
+        drawdown_review_floor_usd=Decimal("180"),
         drawdown_halt_pct=Decimal("0.25"),
-        drawdown_hard_floor_usd=Decimal("180"),
+        drawdown_halt_floor_usd=Decimal("150"),
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
     stub = _StubMarket(market)
@@ -239,13 +232,38 @@ def test_review_10pct_keeps_scanning(tmp_path):
     assert "halt=0" in report.summary
 
 
-def test_drawdown_halt_uses_hard_floor(tmp_path):
-    # Starting equity is 200; a floor of 201 trips even when pct halt is loose.
+def test_equity_below_180_reviews_but_keeps_scanning(tmp_path):
     cfg = paper_config(
         tmp_path,
         session_enabled=False,
+        drawdown_review_pct=Decimal("0.90"),
+        drawdown_review_floor_usd=Decimal("201"),
+        drawdown_halt_pct=Decimal("0.95"),
+        drawdown_halt_floor_usd=Decimal("150"),
+    )
+    market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
+    stub = _StubMarket(market)
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=stub,  # type: ignore[arg-type]
+    )
+    report = runner.run_cycle()
+    assert report.drawdown_review is True  # 200 < 201
+    assert report.drawdown_halt is False
+    assert report.skipped_reason == ""
+    assert stub.list_calls == 1
+    assert any("keep scanning" in line for line in report.messages)
+
+
+def test_drawdown_halt_uses_hard_floor(tmp_path):
+    # Starting equity is 200; halt floor 201 trips even when pct halt is loose.
+    cfg = paper_config(
+        tmp_path,
+        session_enabled=False,
+        drawdown_review_floor_usd=Decimal("250"),
         drawdown_halt_pct=Decimal("0.90"),
-        drawdown_hard_floor_usd=Decimal("201"),
+        drawdown_halt_floor_usd=Decimal("201"),
     )
     market = binary_market(yes_asks=[level("0.30", "20")], no_asks=[level("0.30", "20")])
     stub = _StubMarket(market)

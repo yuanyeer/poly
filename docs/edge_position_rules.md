@@ -105,10 +105,10 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 2. **连续 24h booked=0** — Meter **cumulative time inside this trading window only**. Off-hours (scanner stopped / outside NY 09:00–22:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
 
-3. **Drawdown** — Live, real time: compare current paper ledger equity vs peak. Two separate knobs (do **not** collapse 10% into 25%):
-   - **REVIEW / escalate-to-finance:** `drawdown ≥ drawdown_review_pct` (default **10%**) **OR** equity **below** `drawdown_hard_floor_usd` (default **180**). Logs `REVIEW drawdown` and `SUMMARY ... review=1 halt=0`. Scanning continues unless the hard halt also trips.
-   - **HARD HALT / kill:** `drawdown ≥ drawdown_halt_pct` (default **25%**) **OR** equity **below** 180. Logs `SKIP drawdown_halt` and stops scanning. `SUMMARY` shows `halt=1`.
-   The 180 floor is both a review and a hard-halt concern. This watch runs every cycle, including outside the trading window.
+3. **Drawdown** — Live, real time: compare current paper ledger equity vs peak. Two separate knobs (do **not** collapse 10% into 25%, and do **not** use 180 as a hard stop):
+   - **REVIEW / escalate-to-finance (keep scanning):** `drawdown ≥ drawdown_review_pct` (default **10%**) **OR** equity **< `drawdown_review_floor_usd` (180)**. Logs `REVIEW drawdown`. Equity below 180 does **not** `SKIP`.
+   - **HARD HALT / kill:** `drawdown ≥ drawdown_halt_pct` (default **25%**) **OR** equity **< `drawdown_halt_floor_usd` (150)**. Logs `SKIP drawdown_halt` and stops scanning.
+   This watch runs every cycle, including outside the trading window.
 
 ## Trading session (implemented)
 
@@ -118,8 +118,8 @@ Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DS
 - **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
 - Continuous `booked=0` trigger lines accumulate **only inside this window**, **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
 - Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`).
-  - `REVIEW drawdown` when dd ≥ `drawdown_review_pct` (0.10) or equity < 180 — escalate to finance; **keep scanning**.
-  - `SKIP drawdown_halt` when dd ≥ `drawdown_halt_pct` (0.25) or equity < 180 — **hard stop**. The 10% review line must not be silently treated as 25%.
+  - `REVIEW drawdown` when dd ≥ 10% or equity < **180** — escalate to finance; **keep scanning**. 180 is not a halt floor.
+  - `SKIP drawdown_halt` when dd ≥ 25% or equity < **150** — **hard stop**.
 
 ## Daily scan quality
 

@@ -59,7 +59,7 @@ python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.j
 
 持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：fills、cash、equity、pnl、win_rate、open exposure、`below_floor_n`、`median_net_edge`）。
 
-默认交易窗口是 **America/New_York 09:00–22:00**（本地墙钟，自动 DST）。窗外停止扫描，不是 24 小时交易。`booked=0` 连续计数只在窗口内累加。回撤：10% 或权益低于 180 USD 打 `REVIEW`（上报 finance，不停扫）；25% 或权益低于 180 USD 才 `SKIP drawdown_halt` 硬停。配置见 `config/paper.yaml` 的 `session`：
+默认交易窗口是 **America/New_York 09:00–22:00**（本地墙钟，自动 DST）。窗外停止扫描，不是 24 小时交易。`booked=0` 连续计数只在窗口内累加。回撤：10% 或权益低于 **180** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **150** 才 `SKIP drawdown_halt` 硬停。180 不是硬停地板。配置见 `config/paper.yaml` 的 `session`：
 
 ```bash
 poly-paper --loop

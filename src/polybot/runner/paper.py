@@ -150,7 +150,8 @@ class PaperRunner:
             peak=self.watch.peak_equity,
             review_pct=self.config.drawdown_review_pct,
             halt_pct=self.config.drawdown_halt_pct,
-            hard_floor=self.config.drawdown_hard_floor_usd,
+            review_floor=self.config.drawdown_review_floor_usd,
+            halt_floor=self.config.drawdown_halt_floor_usd,
         )
         messages = [self.status_line(state)]
         self._log_drawdown(messages, state, dd)
@@ -286,7 +287,8 @@ class PaperRunner:
             peak=self.watch.peak_equity,
             review_pct=self.config.drawdown_review_pct,
             halt_pct=self.config.drawdown_halt_pct,
-            hard_floor=self.config.drawdown_hard_floor_usd,
+            review_floor=self.config.drawdown_review_floor_usd,
+            halt_floor=self.config.drawdown_halt_floor_usd,
         )
         if (after.review, after.halt) != (dd.review, dd.halt):
             self._log_drawdown(messages, state, after)
@@ -328,7 +330,7 @@ class PaperRunner:
                 peak=self.watch.peak_equity,
                 equity=state.equity,
                 review_pct=self.config.drawdown_review_pct,
-                floor=self.config.drawdown_hard_floor_usd,
+                review_floor=self.config.drawdown_review_floor_usd,
             )
             messages.append(line)
             logger.warning(line)
@@ -337,7 +339,7 @@ class PaperRunner:
                 peak=self.watch.peak_equity,
                 equity=state.equity,
                 halt_pct=self.config.drawdown_halt_pct,
-                floor=self.config.drawdown_hard_floor_usd,
+                halt_floor=self.config.drawdown_halt_floor_usd,
             )
             messages.append(line)
             logger.error(line)

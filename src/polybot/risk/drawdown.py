@@ -6,24 +6,39 @@ from decimal import Decimal
 
 @dataclass(frozen=True)
 class DrawdownDecision:
-    """Live ledger equity vs peak. Review and hard-halt are separate knobs."""
+    """Live ledger equity vs peak. Review and hard-halt use separate floors."""
 
     drawdown: Decimal
     review: bool
     halt: bool
-    below_floor: bool
+    below_review_floor: bool
+    below_halt_floor: bool
 
-    def review_line(self, *, peak: Decimal, equity: Decimal, review_pct: Decimal, floor: Decimal) -> str:
+    def review_line(
+        self,
+        *,
+        peak: Decimal,
+        equity: Decimal,
+        review_pct: Decimal,
+        review_floor: Decimal,
+    ) -> str:
         return (
             f"REVIEW drawdown peak={peak:.4f} equity={equity:.4f} "
-            f"dd={self.drawdown:.4f} review={review_pct} floor={floor} "
-            f"(escalate-to-finance)"
+            f"dd={self.drawdown:.4f} review={review_pct} floor={review_floor} "
+            f"(escalate-to-finance; keep scanning)"
         )
 
-    def halt_line(self, *, peak: Decimal, equity: Decimal, halt_pct: Decimal, floor: Decimal) -> str:
+    def halt_line(
+        self,
+        *,
+        peak: Decimal,
+        equity: Decimal,
+        halt_pct: Decimal,
+        halt_floor: Decimal,
+    ) -> str:
         return (
             f"SKIP drawdown_halt peak={peak:.4f} equity={equity:.4f} "
-            f"dd={self.drawdown:.4f} halt={halt_pct} floor={floor} "
+            f"dd={self.drawdown:.4f} halt={halt_pct} floor={halt_floor} "
             f"(hard stop)"
         )
 
@@ -34,13 +49,25 @@ def classify_drawdown(
     peak: Decimal,
     review_pct: Decimal,
     halt_pct: Decimal,
-    hard_floor: Decimal,
+    review_floor: Decimal,
+    halt_floor: Decimal,
 ) -> DrawdownDecision:
+    """REVIEW: dd >= 10% OR equity < 180. HALT: dd >= 25% OR equity < 150.
+
+    Equity below the review floor must not by itself hard-stop.
+    """
     if peak <= 0:
         drawdown = Decimal("0")
     else:
         drawdown = (peak - equity) / peak
-    below_floor = equity < hard_floor
-    review = drawdown >= review_pct or below_floor
-    halt = drawdown >= halt_pct or below_floor
-    return DrawdownDecision(drawdown=drawdown, review=review, halt=halt, below_floor=below_floor)
+    below_review_floor = equity < review_floor
+    below_halt_floor = equity < halt_floor
+    review = drawdown >= review_pct or below_review_floor
+    halt = drawdown >= halt_pct or below_halt_floor
+    return DrawdownDecision(
+        drawdown=drawdown,
+        review=review,
+        halt=halt,
+        below_review_floor=below_review_floor,
+        below_halt_floor=below_halt_floor,
+    )
