@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -38,6 +38,13 @@ def run_fixture_dryrun(
     book_now = fixture_clock(raw, "now")
     settle_now = fixture_clock(raw, "settle_now")
     winner = str(raw.get("winner") or "Up")
+    opened = fixture_clock(raw["market"], "round_open")
+    enter_at = opened + timedelta(seconds=float(config.whiskas.enter_after_open_seconds))
+    if book_now != enter_at:
+        raise ValueError(
+            f"fixture now must be exactly open+{config.whiskas.enter_after_open_seconds:.0f}s "
+            f"(got {book_now.isoformat()}, expected {enter_at.isoformat()})"
+        )
 
     arb_path = arb_ledger or config.ledger_path
     whiskas_path = whiskas_ledger or config.whiskas.ledger_path or Path("data/whiskas-inv.jsonl")

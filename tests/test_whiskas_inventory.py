@@ -291,6 +291,23 @@ def test_default_book_pauses_arb_and_opens_whiskas_inv(tmp_path: Path):
     assert book.whiskas().state().starting_balance == Decimal("2300")
 
 
+def test_fixture_dryrun_rejects_now_not_exactly_open_plus_6s(tmp_path: Path):
+    import json
+
+    from polybot.runner.fixture_dryrun import run_fixture_dryrun
+
+    raw = json.loads(Path("fixtures/whiskas_btc_5m_round.json").read_text(encoding="utf-8"))
+    raw["now"] = "2026-09-16T12:00:30+00:00"
+    bad = tmp_path / "late.json"
+    bad.write_text(json.dumps(raw), encoding="utf-8")
+    cfg = load_config("config/paper.yaml")
+    try:
+        run_fixture_dryrun(cfg, bad, whiskas_ledger=tmp_path / "w.jsonl", arb_ledger=tmp_path / "a.jsonl")
+        raise AssertionError("expected ValueError for now != open+6s")
+    except ValueError as exc:
+        assert "open+6s" in str(exc)
+
+
 def test_fixture_dryrun_writes_both_legs_and_redemption(tmp_path: Path):
     from polybot.runner.cli import main
     from polybot.runner.fixture_dryrun import run_fixture_dryrun
@@ -321,7 +338,9 @@ def test_fixture_dryrun_writes_both_legs_and_redemption(tmp_path: Path):
     ts = datetime.fromisoformat(fill.ts)
     opened = datetime.fromisoformat("2026-09-16T12:00:00+00:00")
     ended = datetime.fromisoformat("2026-09-16T12:05:00+00:00")
-    assert (ts - opened).total_seconds() >= 6
+    assert (ts - opened).total_seconds() == 6
+    assert fill.ts == "2026-09-16T12:00:06+00:00"
+    assert (ended - ts).total_seconds() == 294
     assert (ended - ts).total_seconds() > 100
     redeem = [fill for fill in result.whiskas_state.fills if "redeem" in fill.notes][0]
     assert redeem.cash_credit == Decimal("50")

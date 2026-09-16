@@ -1,12 +1,12 @@
 {
   "label": "recorded BTC 5m Up/Down paper fixture — not a live CLOB order",
   "paper_only": true,
-  "now": "2026-09-16T12:00:30+00:00",
+  "now": "2026-09-16T12:00:06+00:00",
   "settle_now": "2026-09-16T12:05:01+00:00",
   "winner": "Up",
   "notes": [
     "Round open 12:00:00Z, end 12:05:00Z (300s).",
-    "Book clock 12:00:30Z is +30s after open and 270s remaining (gates: +6s / stop ≤100s left).",
+    "Book clock 12:00:06Z is exactly open+6s; remaining 294s (stop only when ≤100s left).",
     "Asks walk 50 shares on both Up and Down; VWAPs ≤0.89; combo ≤1.05.",
     "Lock-arb decoy is cheap enough that arb-main WOULD book if booking were not paused."
   ],
