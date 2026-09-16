@@ -75,9 +75,9 @@ Post-only quotes only when:
 
 Paper fill: match only when live book trades through our price (or sim fill model agreed with eng).
 
-### D) Copy-follow (newly allowed)
+### D) Copy-follow (newly allowed; paper-only hooks)
 
-Source of truth: [`docs/copy_follow_rules.md`](copy_follow_rules.md). Lock arb (YES+NO / complete-set) and maker floors above are unchanged.
+Source of truth: [`docs/copy_follow_rules.md`](copy_follow_rules.md). Lock arb (YES+NO / complete-set) and maker floors above are unchanged. Observation hooks: `docs/copy_trading.md`.
 
 Copy legs have no YES+NO lock edge. The chase gate **replaces `MIN_EDGE_TAKER` for copy legs only**:
 
@@ -88,6 +88,10 @@ abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE
 ```
 
 Do not apply `MIN_EDGE_TAKER` (0.5¢) to copy legs. Do not apply `COPY_MAX_CHASE` to lock-arb or maker legs.
+
+- Sleeve ≤ 30% of equity; 25% / 40% / ≤3 concurrent still apply
+- Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl < 0
+- Rescan replacements must have peak **and** path dd < 5% and still be profitable
 
 ## Position gates (all must pass)
 

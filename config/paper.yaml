@@ -71,3 +71,10 @@ session:
   drawdown_review_floor_usd: 180
   drawdown_halt_pct: 0.25
   drawdown_halt_floor_usd: 150
+
+# Copy-trading observation (paper-only hooks). YES+NO / complete-set arb unchanged.
+# Watchlist, stop-follow, and sleeve limits live in the referenced file.
+# Loader rejects a sleeve above 30% or loosened stop-follow thresholds.
+# No live orders. No fabricated fills. See docs/copy_trading.md.
+copy:
+  path: config/copy.yaml

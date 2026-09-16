@@ -31,6 +31,19 @@ def test_load_default_config():
     assert cfg.drawdown_review_floor_usd == Decimal("180")
     assert cfg.drawdown_halt_pct == Decimal("0.25")
     assert cfg.drawdown_halt_floor_usd == Decimal("150")
+    assert cfg.copy is not None
+    assert cfg.copy.enabled is True
+    assert cfg.copy.max_sleeve_pct == Decimal("0.30")
+    assert cfg.copy.stop_peak_dd == Decimal("0.05")
+    assert cfg.copy.stop_path_dd == Decimal("0.05")
+    assert [leader.id for leader in cfg.copy.leaders] == [
+        "x-MoneyForWhiskas",
+        "0xcd30457c79",
+        "goldfisherrr",
+    ]
+    assert cfg.copy.leaders[0].primary is True
+    assert cfg.copy.leaders[0].strategy_tag == "BTC_5m"
+    assert cfg.copy.leaders[2].strategy_tag == "BTC_15m"
 
 
 def test_rejects_loosened_position_cap(tmp_path: Path):

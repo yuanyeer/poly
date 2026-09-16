@@ -22,10 +22,29 @@ class RiskEngine:
             return RiskDecision(allowed=False, reason="; ".join(reasons))
         return RiskDecision(allowed=True, reason="ok", capped_size=opportunity.size)
 
-    def _hard_rejects(self, opportunity: Opportunity, state: LedgerState) -> list[str]:
+    def notional_cap_reasons(self, notional: Decimal, event_id: str, state: LedgerState) -> list[str]:
+        """Shared 25% / 40% / ≤3 concurrent gates (also used by copy sleeve stub)."""
         reasons: list[str] = []
         if state.open_count >= self.config.max_concurrent_open:
             reasons.append(f"concurrent open {state.open_count} >= {self.config.max_concurrent_open}")
+        if notional > state.cash:
+            reasons.append("notional exceeds cash")
+        max_trade = state.cash * self.config.max_trade_notional_pct
+        if notional > max_trade:
+            reasons.append(
+                f"single-trade notional {notional} > {self.config.max_trade_notional_pct:.0%} of cash"
+            )
+        current_event = state.event_exposure.get(event_id, ZERO)
+        max_event = state.cash * self.config.max_same_event_exposure_pct
+        if current_event + notional > max_event:
+            reasons.append(
+                f"same-event exposure would exceed {self.config.max_same_event_exposure_pct:.0%} of cash"
+            )
+        return reasons
+
+    def _hard_rejects(self, opportunity: Opportunity, state: LedgerState) -> list[str]:
+        reasons: list[str] = []
+        reasons.extend(self.notional_cap_reasons(opportunity.notional, opportunity.event_id, state))
         if not opportunity.legs:
             reasons.append("no legs")
             return reasons
@@ -42,19 +61,6 @@ class RiskEngine:
         )
         if opportunity.edge < floor:
             reasons.append(f"edge {opportunity.edge} below floor {floor}")
-        if opportunity.notional > state.cash:
-            reasons.append("notional exceeds cash")
-        max_trade = state.cash * self.config.max_trade_notional_pct
-        if opportunity.notional > max_trade:
-            reasons.append(
-                f"single-trade notional {opportunity.notional} > {self.config.max_trade_notional_pct:.0%} of cash"
-            )
-        current_event = state.event_exposure.get(opportunity.event_id, ZERO)
-        max_event = state.cash * self.config.max_same_event_exposure_pct
-        if current_event + opportunity.notional > max_event:
-            reasons.append(
-                f"same-event exposure would exceed {self.config.max_same_event_exposure_pct:.0%} of cash"
-            )
         residual = self._unhedged_notional(opportunity)
         if residual > self.config.max_unhedged_inventory:
             reasons.append(f"unhedged inventory {residual} exceeds bound")

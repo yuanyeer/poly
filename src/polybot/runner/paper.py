@@ -8,6 +8,9 @@ from decimal import Decimal
 from typing import Callable
 
 from polybot.config import PaperConfig
+from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, MetricsProvider
+from polybot.copy.monitor import CopyEvent, CopyMonitor
+from polybot.copy.watchlist import Watchlist, load_watchlist
 from polybot.ledger.store import PaperLedger
 from polybot.market.client import LiveOrderForbidden, PaperMarketClient
 from polybot.risk.drawdown import DrawdownDecision, classify_drawdown
@@ -21,6 +24,15 @@ from polybot.types import LedgerState, MarketSnapshot, Opportunity, ScanTarget
 logger = logging.getLogger(__name__)
 
 NowFn = Callable[[], datetime]
+
+
+def _copy_event_names(events: list[CopyEvent] | tuple[str, ...] | None) -> tuple[str, ...]:
+    if not events:
+        return ()
+    names: list[str] = []
+    for item in events:
+        names.append(item.name if isinstance(item, CopyEvent) else str(item))
+    return tuple(names)
 
 
 @dataclass
@@ -43,6 +55,7 @@ class CycleReport:
     drawdown: Decimal = Decimal("0")
     drawdown_review: bool = False
     drawdown_halt: bool = False
+    copy_events: tuple[str, ...] = ()
 
 
 @dataclass
@@ -116,6 +129,16 @@ class PaperRunner:
         self.watch = SessionWatch()
         self._day_key: str | None = None
         self._now = now_fn or utc_now
+        self.copy_watchlist: Watchlist | None = None
+        self.copy_monitor: CopyMonitor | None = None
+        if config.copy is not None and config.copy.enabled:
+            provider: MetricsProvider
+            if config.copy.metrics_stub is not None:
+                provider = JsonFileMetricsProvider(config.copy.metrics_stub)
+            else:
+                provider = InMemoryMetricsProvider()
+            self.copy_watchlist = load_watchlist(config.copy)
+            self.copy_monitor = CopyMonitor(config.copy, self.copy_watchlist, provider)
 
     def status_line(self, state: LedgerState) -> str:
         progress = (state.equity / self.config.target_balance) * Decimal("100")
@@ -159,6 +182,7 @@ class PaperRunner:
         )
         messages = [self.status_line(state)]
         self._log_drawdown(messages, state, dd)
+        copy_events = self._observe_copy(messages)
         in_window = in_trading_window(
             self.config.session_timezone,
             self.config.session_start,
@@ -200,6 +224,7 @@ class PaperRunner:
                 in_session=False,
                 now=now,
                 drawdown=dd,
+                copy_events=copy_events,
             )
 
         if dd.halt:
@@ -217,6 +242,7 @@ class PaperRunner:
                 in_session=True,
                 now=now,
                 drawdown=dd,
+                copy_events=copy_events,
             )
 
         targets = self._targets()
@@ -309,6 +335,7 @@ class PaperRunner:
             in_session=True,
             now=now,
             drawdown=after,
+            copy_events=copy_events,
         )
 
     def _empty_report(self, state: LedgerState, message: str) -> CycleReport:
@@ -326,6 +353,7 @@ class PaperRunner:
             summary=format_summary("SUMMARY", self.config, state, self.stats),
             daily_summary=format_daily(daily_snap, self.config),
             peak_equity=self.watch.peak_equity,
+            copy_events=(),
         )
 
     def _log_drawdown(self, messages: list[str], state: LedgerState, dd: DrawdownDecision) -> None:
@@ -371,6 +399,7 @@ class PaperRunner:
         in_session: bool,
         now: datetime,
         drawdown: DrawdownDecision,
+        copy_events: list[CopyEvent] | tuple[str, ...] | None = None,
     ) -> CycleReport:
         messages.append(self.status_line(state))
         summary = format_summary(
@@ -420,7 +449,16 @@ class PaperRunner:
             drawdown=drawdown.drawdown,
             drawdown_review=drawdown.review,
             drawdown_halt=drawdown.halt,
+            copy_events=_copy_event_names(copy_events),
         )
+
+    def _observe_copy(self, messages: list[str]) -> list[CopyEvent]:
+        if self.copy_monitor is None:
+            return []
+        events = self.copy_monitor.poll()
+        for event in events:
+            messages.append(event.line())
+        return events
 
     def _record_market_edge(self, snapshot: MarketSnapshot) -> None:
         best: tuple[Decimal, Decimal] | None = None

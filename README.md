@@ -19,7 +19,19 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 1. **YES+NO lock**：对同一市场买入全部互斥结果，`edge_taker = 1 − Σ walk_ask(size_i) − Σ fee/share`，门槛 ≥ **0.5¢ (0.005)**。
 2. **Multi-outcome complete-set**：三个及以上结果同样锁完全集，公式相同。
 3. **Maker spread**：只在挂买价 + 对侧可成交路径的净 edge ≥ **0.2¢ (0.002)**，且库存风险被完全对冲时才记账。
-4. **Copy-follow**（新增允许类型）：跟单腿用 chase gate **1¢ (`COPY_MAX_CHASE=0.01`)** 替代 `MIN_EDGE_TAKER`（**仅 copy 腿**；YES+NO / complete-set lock-arb 门槛不变）。规则见 [`docs/copy_follow_rules.md`](docs/copy_follow_rules.md)。
+4. **Copy-follow**（新增允许类型）：跟单腿用 chase gate **1¢ (`COPY_MAX_CHASE=0.01`)** 替代 `MIN_EDGE_TAKER`（**仅 copy 腿**；YES+NO / complete-set lock-arb 门槛不变）。规则见 [`docs/copy_follow_rules.md`](docs/copy_follow_rules.md)。纸面钩子见 `docs/copy_trading.md`。
+
+### Copy-trading 观察（纸面）
+
+poly金融新增允许策略：**跟单观察 → 小仓纸面**。YES+NO / complete-set 套利照旧。
+
+- 观察名单（优先级）：`x-MoneyForWhiskas`（BTC 5m，主领）、`0xcd30457c79`（BTC 5m）、`goldfisherrr`（BTC 15m）。配置键是展示名；钱包地址映射仍是 TODO。
+- 停跟：领单 `peak_dd ≥ 5%` **或** `path_dd ≥ 5%` **或** `month_pnl < 0` → 标记 inactive，打出 `STOP_FOLLOW` + `RESCAN_NEEDED`。
+- 重扫钩子：要求候选 `peak_dd` 与 `path_dd` 都 **< 5%** 且仍盈利。默认只记日志，没有 live 钱包扫描器。
+- 袖仓 ≤ 权益 **30%**；原有 25% / 40% / 同时 ≤3 仍然生效。
+- `MirrorExecutor` 是 stub：要求 delay + 深度 walk + 手续费，违规则拒绝；**不写账本、不下单**。
+
+配置在 `config/copy.yaml`（`config/paper.yaml` 的 `copy.path`）。加载器会拒绝袖仓 > 30% 或放宽停跟阈值。
 
 手续费：
 
@@ -79,15 +91,18 @@ pip install -e ".[dev]"
 pytest
 ```
 
-覆盖账本记账 / 哈希链、风控门槛、手续费与盘口 walk、三种策略的 edge 判定，以及 paper 模式禁止真实下单路径。
+覆盖账本记账 / 哈希链、风控门槛、手续费与盘口 walk、三种策略的 edge 判定、copy 观察名单 / 停跟 / 袖仓，以及 paper 模式禁止真实下单路径。
 
 ## 目录
 
 ```
 config/paper.yaml            # 硬约束 + 公共端点
+config/copy.yaml             # copy 观察名单 / 停跟 / 袖仓（paper 引用）
 docs/copy_follow_rules.md    # 跟单规则 v1（watchlist / chase gate 1¢ / sleeve）
 docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)
+docs/copy_trading.md       # copy 观察、停跟、重扫、mirror stub
 src/polybot/
+  copy/                    # watchlist / metrics stub / monitor / mirror stub
   ledger/                  # 追加式 paper 账本
   market/                  # CLOB 只读客户端、盘口 walk、fd 费率
   strategy/                # yes_no_lock / complete_set / maker_spread
