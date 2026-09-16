@@ -80,6 +80,7 @@ pytest
 
 ```
 config/paper.yaml          # 硬约束 + 公共端点
+docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)
 src/polybot/
   ledger/                  # 追加式 paper 账本
   market/                  # CLOB 只读客户端、盘口 walk、fd 费率
