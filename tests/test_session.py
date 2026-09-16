@@ -15,20 +15,20 @@ def _utc(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetim
 
 
 def test_ny_window_respects_edt_in_summer():
-    # 2026-07-15 13:00 UTC = 09:00 EDT
-    assert in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 7, 15, 13, 0))
-    assert not in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 7, 15, 12, 59))
-    # 02:00 UTC = 22:00 EDT → [start, end) so closed
-    assert not in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 7, 16, 2, 0))
-    assert in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 7, 16, 1, 59))
+    # 2026-07-15 12:00 UTC = 08:00 EDT
+    assert in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 7, 15, 12, 0))
+    assert not in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 7, 15, 11, 59))
+    # 03:00 UTC = 23:00 EDT → [start, end) so closed
+    assert not in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 7, 16, 3, 0))
+    assert in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 7, 16, 2, 59))
 
 
 def test_ny_window_respects_est_in_winter():
-    # 2026-01-15 14:00 UTC = 09:00 EST
-    assert in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 1, 15, 14, 0))
-    assert not in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 1, 15, 13, 59))
-    # 03:00 UTC = 22:00 EST → closed
-    assert not in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 1, 16, 3, 0))
+    # 2026-01-15 13:00 UTC = 08:00 EST
+    assert in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 1, 15, 13, 0))
+    assert not in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 1, 15, 12, 59))
+    # 04:00 UTC = 23:00 EST → closed
+    assert not in_trading_window("America/New_York", "08:00", "23:00", _utc(2026, 1, 16, 4, 0))
 
 
 def test_yaml_timezone_asia_shanghai_is_honored_when_configured():
@@ -43,8 +43,8 @@ def test_yaml_timezone_asia_shanghai_is_honored_when_configured():
 def test_disabled_session_is_always_open():
     assert in_trading_window(
         "America/New_York",
-        "09:00",
-        "22:00",
+        "08:00",
+        "23:00",
         _utc(2026, 7, 15, 3, 0),
         enabled=False,
     )
@@ -77,8 +77,8 @@ def test_runner_stops_scanning_outside_ny_window(tmp_path):
         tmp_path,
         session_enabled=True,
         session_timezone="America/New_York",
-        session_start="09:00",
-        session_end="22:00",
+        session_start="08:00",
+        session_end="23:00",
     )
     market = binary_market(yes_asks=[level("0.30", "20")], no_asks=[level("0.30", "20")])
     stub = _StubMarket(market)
@@ -104,8 +104,8 @@ def test_zero_book_streak_ignores_off_hours(tmp_path):
         tmp_path,
         session_enabled=True,
         session_timezone="America/New_York",
-        session_start="09:00",
-        session_end="22:00",
+        session_start="08:00",
+        session_end="23:00",
         poll_interval_seconds=0.0,
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
@@ -136,8 +136,8 @@ def test_idle_zero_fill_trigger_after_two_sessions(tmp_path):
         tmp_path,
         session_enabled=True,
         session_timezone="America/New_York",
-        session_start="09:00",
-        session_end="22:00",
+        session_start="08:00",
+        session_end="23:00",
         idle_zero_fill_sessions=2,
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
@@ -310,13 +310,13 @@ def test_overnight_idle_cycles_do_not_grow_booked_zero_streak(tmp_path):
         tmp_path,
         session_enabled=True,
         session_timezone="America/New_York",
-        session_start="09:00",
-        session_end="22:00",
+        session_start="08:00",
+        session_end="23:00",
         poll_interval_seconds=0.0,
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
     stub = _StubMarket(market)
-    clock = {"now": _utc(2026, 7, 16, 2, 30)}  # 22:30 EDT, closed
+    clock = {"now": _utc(2026, 7, 16, 3, 0)}  # 23:00 EDT, closed
 
     def now_fn() -> datetime:
         return clock["now"]
@@ -329,7 +329,7 @@ def test_overnight_idle_cycles_do_not_grow_booked_zero_streak(tmp_path):
     )
     runner.watch.zero_book_cycles = 4
     runner.watch.peak_equity = Decimal("200")
-    for hour in range(3, 13):
+    for hour in range(3, 12):  # 23:00 EDT … 07:00 EDT; 08:00 EDT = 12:00 UTC is open
         clock["now"] = _utc(2026, 7, 16, hour, 0)
         report = runner.run_cycle()
         assert report.skipped_reason == "session_closed"

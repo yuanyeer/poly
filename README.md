@@ -19,6 +19,7 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 1. **YES+NO lock**：对同一市场买入全部互斥结果，`edge_taker = 1 − Σ walk_ask(size_i) − Σ fee/share`，门槛 ≥ **0.5¢ (0.005)**。
 2. **Multi-outcome complete-set**：三个及以上结果同样锁完全集，公式相同。
 3. **Maker spread**：只在挂买价 + 对侧可成交路径的净 edge ≥ **0.2¢ (0.002)**，且库存风险被完全对冲时才记账。
+4. **Copy-follow**（新增允许类型）：跟单腿用 chase gate **1¢ (`COPY_MAX_CHASE=0.01`)** 替代 `MIN_EDGE_TAKER`（**仅 copy 腿**；YES+NO / complete-set lock-arb 门槛不变）。规则见 [`docs/copy_follow_rules.md`](docs/copy_follow_rules.md)。
 
 手续费：
 
@@ -59,7 +60,7 @@ python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.j
 
 持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：fills、cash、equity、pnl、win_rate、open exposure、`below_floor_n`、`median_net_edge`）。
 
-默认交易窗口是 **America/New_York 09:00–22:00**（本地墙钟，自动 DST）。窗外停止扫描，不是 24 小时交易。`booked=0` 连续计数只在窗口内累加。回撤：10% 或权益低于 **180** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **150** 才 `SKIP drawdown_halt` 硬停。180 不是硬停地板。配置见 `config/paper.yaml` 的 `session`：
+默认交易窗口是 **America/New_York 08:00–23:00**（本地墙钟，自动 DST）。窗外停止扫描，不是 24 小时交易。`booked=0` 连续计数只在窗口内累加。回撤：10% 或权益低于 **180** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **150** 才 `SKIP drawdown_halt` 硬停。180 不是硬停地板。配置见 `config/paper.yaml` 的 `session`：
 
 ```bash
 poly-paper --loop
@@ -67,7 +68,7 @@ poly-paper --loop
 
 发现面会同时拉 CLOB `sampling-markets` + `markets`（可翻页）和 Gamma 活跃市场 / 多结果事件。YES+NO 与 complete-set 会在多个数量上 walk 盘口（不只看最深一档），门槛与风控不变。
 
-配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。
+配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型见 `docs/copy_follow_rules.md`。
 
 账本是 `data/paper_ledger.jsonl`：只追加、带哈希链。没有 `set_balance`。余额 = 200 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
 
@@ -83,7 +84,8 @@ pytest
 ## 目录
 
 ```
-config/paper.yaml          # 硬约束 + 公共端点
+config/paper.yaml            # 硬约束 + 公共端点
+docs/copy_follow_rules.md    # 跟单规则 v1（watchlist / chase gate 1¢ / sleeve）
 docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)
 src/polybot/
   ledger/                  # 追加式 paper 账本
