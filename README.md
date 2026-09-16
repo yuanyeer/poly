@@ -1,6 +1,6 @@
 # poly
 
-Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。起始资金 **200 USD**，里程碑 **1000 USD**（只用于报告，不会伪造成交去凑数）。
+Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。每本独立账本起始 **1000 USD**，先到 **2000 USD** 获胜（只用于报告，不会伪造成交去凑数）。
 
 本仓库**不会**在 paper 模式向 CLOB 发送真实订单。
 
@@ -12,7 +12,7 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 | 按盘口逐档 walk 计算可成交均价与滑点 | 把最优一档数量当成全部可成交量 |
 | 使用 `fd.r` / `fd.to` 计算 taker 费（maker 在 `fd.to=true` 时为 0） | 手改账本余额 |
 | 本地 JSONL 追加成交，余额由成交回放得出 | 单边方向性下注、跨事件无对冲叙事单 |
-| 风控：单笔 ≤ 资金 25%、同事件 ≤ 40%、同时未平仓机会 ≤ 3 | 为了冲 1000 USD 而虚增成交 |
+| 风控：单笔 ≤ 该账本资金 25%、同事件 ≤ 40%、同时未平仓机会 ≤ 3 | 为了冲 2000 USD 而虚增成交 |
 
 ## 策略（结构已实现，含真实 edge 公式）
 
@@ -25,14 +25,16 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 
 poly金融新增允许策略：**跟单观察 → 小仓纸面**。YES+NO / complete-set 套利照旧。
 
-- 观察名单（优先级）：`x-MoneyForWhiskas`（BTC 5m，主领）、`0xcd30457c79`（BTC 5m）、`goldfisherrr`（BTC 15m）。配置键是展示名；钱包地址映射仍是 TODO。
+- 观察名单（优先级）：`x-MoneyForWhiskas`（BTC 5m，主领，**全日 / 24h**）、`0xcd30457c79`（BTC 5m）、`goldfisherrr`（BTC 15m）。配置键是展示名；钱包地址映射仍是 TODO。
 - 停跟：领单 `peak_dd ≥ 5%` **或** `path_dd ≥ 5%` **或** `month_pnl ≤ 0`（含 0）→ 标记 inactive，打出 `STOP_FOLLOW` + `RESCAN_NEEDED`。
 - Mirror chase：`|fill_px − leader_px| + fee/share > 0.01`（1¢）则放弃该笔，不跟。
 - 重扫钩子：要求候选 `peak_dd` 与 `path_dd` 都 **< 5%** 且仍盈利。默认只记日志，没有 live 钱包扫描器。
-- 袖仓 ≤ 权益 **30%**；原有 25% / 40% / 同时 ≤3 仍然生效。
+- **无全局 30% 袖仓**。每个领单独立 paper 账本，起始 **1000 USD**；风控只相对该账本自身权益。违约只停该 copy 账本。赛跑见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)（先到 **2000 USD**，报告字段 `distance_to_2000`）。
+- 回撤（每本账本）：10% 或权益低于 **900** 打 `REVIEW`（该账本继续扫）；25% 或权益低于 **750** 才对该账本 `SKIP`。
+- 原有 25% / 40% / 同时 ≤3 仍按**该账本**现金生效。Copy 账本可 **连续扫描**，以镜像 24h 领单。
 - `MirrorExecutor` 是 stub：要求 delay + 深度 walk + 手续费，违规则拒绝；**不写账本、不下单**。
 
-配置在 `config/copy.yaml`（`config/paper.yaml` 的 `copy.path`）。加载器会拒绝袖仓 > 30% 或放宽停跟阈值。
+配置在 `config/copy.yaml`（`config/paper.yaml` 的 `copy.path`）。加载器仍会拒绝放宽停跟阈值。多账本赛跑规则（docs freeze）见 `docs/multi_ledger_race.md`。
 
 手续费：
 
@@ -71,9 +73,9 @@ poly-paper --once
 python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.jsonl
 ```
 
-持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：fills、cash、equity、pnl、win_rate、open exposure、`below_floor_n`、`median_net_edge`）。
+持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：按 `ledger_id` 拆分 fills、cash、equity、pnl、`distance_to_2000`、win_rate、open exposure、`below_floor_n`、`median_net_edge`、review/halt）。
 
-默认交易窗口是 **America/New_York 08:00–23:00**（本地墙钟，自动 DST）。窗外停止扫描，不是 24 小时交易。`booked=0` 连续计数只在窗口内累加。回撤：10% 或权益低于 **180** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **150** 才 `SKIP drawdown_halt` 硬停。180 不是硬停地板。配置见 `config/paper.yaml` 的 `session`：
+**24h 交易已冻结（ops）。** 不再要求 America/New_York 08:00–23:00 时段门；默认连续 **24h** / **00:00–24:00 ET**。`config/paper.yaml` 为 `session.enabled: false`，**没有** 08:00–23:00。`booked=0` escalate 按**日历连续 24h** 计（已无 off-hours）。Copy 账本可连续扫描以镜像全日领单（优先 `x-MoneyForWhiskas`）。多账本赛跑回撤（每本账本）：10% 或权益低于 **900** 打 `REVIEW`（上报 finance，**该账本不停扫**）；25% 或权益低于 **750** 才对该账本 `SKIP drawdown_halt`。900 不是硬停地板。
 
 ```bash
 poly-paper --loop
@@ -81,9 +83,9 @@ poly-paper --loop
 
 发现面会同时拉 CLOB `sampling-markets` + `markets`（可翻页）和 Gamma 活跃市场 / 多结果事件。YES+NO 与 complete-set 会在多个数量上 walk 盘口（不只看最深一档），门槛与风控不变。
 
-配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型见 `docs/copy_follow_rules.md`。
+配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型见 `docs/copy_follow_rules.md`。多账本赛跑（每本 **1000 → 2000**）见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)。
 
-账本是 `data/paper_ledger.jsonl`：只追加、带哈希链。没有 `set_balance`。余额 = 200 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
+账本是 `data/paper_ledger.jsonl`（arb-main）以及同目录 `copy-<leader>.jsonl`：只追加、带哈希链。没有 `set_balance`。每本账本余额 = 1000 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
 
 ## 测试
 
@@ -92,14 +94,15 @@ pip install -e ".[dev]"
 pytest
 ```
 
-覆盖账本记账 / 哈希链、风控门槛、手续费与盘口 walk、三种策略的 edge 判定、copy 观察名单 / 停跟 / 袖仓，以及 paper 模式禁止真实下单路径。
+覆盖账本记账 / 哈希链、风控门槛、手续费与盘口 walk、三种策略的 edge 判定、copy 观察名单 / 停跟 / 独立账本风控，以及 paper 模式禁止真实下单路径。
 
 ## 目录
 
 ```
 config/paper.yaml            # 硬约束 + 公共端点
-config/copy.yaml             # copy 观察名单 / 停跟 / 袖仓（paper 引用）
-docs/copy_follow_rules.md    # 跟单规则 v1（watchlist / chase gate 1¢ / sleeve）
+config/copy.yaml             # copy 观察名单 / 停跟（paper 引用）
+docs/multi_ledger_race.md    # 多账本赛跑 freeze（1000 → 2000，24h session）
+docs/copy_follow_rules.md    # 跟单规则 v1（watchlist / chase gate 1¢ / 独立账本）
 docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)
 docs/copy_trading.md       # copy 观察、停跟、重扫、mirror stub
 src/polybot/

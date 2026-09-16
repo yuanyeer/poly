@@ -15,22 +15,21 @@ from tests.conftest import paper_config
 def test_load_default_config():
     cfg = load_config("config/paper.yaml")
     assert cfg.mode == "paper"
-    assert cfg.starting_balance == Decimal("200")
-    assert cfg.target_balance == Decimal("1000")
+    assert cfg.starting_balance == Decimal("1000")
+    assert cfg.target_balance == Decimal("2000")
     assert cfg.taker_edge_floor == Decimal("0.005")
     assert cfg.maker_edge_floor == Decimal("0.002")
     assert cfg.max_trade_notional_pct == Decimal("0.25")
     assert cfg.max_same_event_exposure_pct == Decimal("0.40")
     assert cfg.max_concurrent_open == 3
-    assert cfg.session_enabled is True
-    assert cfg.session_timezone == "America/New_York"
-    assert cfg.session_start == "08:00"
-    assert cfg.session_end == "23:00"
-    assert cfg.idle_zero_fill_sessions == 2
+    assert cfg.session_enabled is False
+    assert "08:00" not in Path("config/paper.yaml").read_text(encoding="utf-8")
+    assert "23:00" not in Path("config/paper.yaml").read_text(encoding="utf-8")
+    assert cfg.idle_zero_fill_hours == 24
     assert cfg.drawdown_review_pct == Decimal("0.10")
-    assert cfg.drawdown_review_floor_usd == Decimal("180")
+    assert cfg.drawdown_review_floor_usd == Decimal("900")
     assert cfg.drawdown_halt_pct == Decimal("0.25")
-    assert cfg.drawdown_halt_floor_usd == Decimal("150")
+    assert cfg.drawdown_halt_floor_usd == Decimal("750")
     assert cfg.copy is not None
     assert cfg.copy.enabled is True
     assert cfg.copy.max_sleeve_pct == Decimal("0.30")
@@ -77,6 +76,7 @@ def test_rejects_too_fast_polling(tmp_path: Path):
 
 def test_session_window_is_yaml_editable(tmp_path: Path):
     raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["session"]["enabled"] = True
     raw["session"]["timezone"] = "Asia/Shanghai"
     raw["session"]["start"] = "10:00"
     raw["session"]["end"] = "23:00"
@@ -99,6 +99,23 @@ def test_rejects_review_pct_above_halt(tmp_path: Path):
         load_config(path)
 
 
+def test_start_target_and_floors_are_yaml_editable(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["ledger"]["starting_balance_usd"] = 1000
+    raw["ledger"]["target_balance_usd"] = 2500
+    raw["session"]["drawdown_review_floor_usd"] = 880
+    raw["session"]["drawdown_halt_floor_usd"] = 700
+    path = tmp_path / "knobs.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(path)
+    assert cfg.starting_balance == Decimal("1000")
+    assert cfg.target_balance == Decimal("2500")
+    assert cfg.drawdown_review_floor_usd == Decimal("880")
+    assert cfg.drawdown_halt_floor_usd == Decimal("700")
+    assert cfg.drawdown_review_pct == Decimal("0.10")
+    assert cfg.drawdown_halt_pct == Decimal("0.25")
+
+
 def test_rejects_halt_floor_at_review_180(tmp_path: Path):
     raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
     raw["session"]["drawdown_review_floor_usd"] = 180
@@ -109,13 +126,26 @@ def test_rejects_halt_floor_at_review_180(tmp_path: Path):
         load_config(path)
 
 
-def test_rejects_24h_session_window(tmp_path: Path):
+def test_allows_disabled_session_for_24h_trading(tmp_path: Path):
     raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["session"]["enabled"] = False
     raw["session"]["start"] = "00:00"
     raw["session"]["end"] = "00:00"
     path = tmp_path / "allday.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
-    with pytest.raises(ConfigError, match="24h"):
+    cfg = load_config(path)
+    assert cfg.session_enabled is False
+    assert cfg.idle_zero_fill_hours == 24
+
+
+def test_rejects_enabled_session_with_empty_window(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["session"]["enabled"] = True
+    raw["session"]["start"] = "00:00"
+    raw["session"]["end"] = "00:00"
+    path = tmp_path / "emptywin.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ConfigError, match="same-day"):
         load_config(path)
 
 

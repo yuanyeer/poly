@@ -145,6 +145,10 @@ def build_daily_snapshot(
     )
 
 
+def distance_to_target(state: LedgerState, target) -> Decimal:
+    return Decimal(str(target)) - state.equity
+
+
 def format_summary(
     label: str,
     config: PaperConfig,
@@ -155,6 +159,8 @@ def format_summary(
     drawdown: Decimal | None = None,
     drawdown_review: bool = False,
     drawdown_halt: bool = False,
+    account_id: str | None = None,
+    paused: bool = False,
 ) -> str:
     window_fills = fills if fills is not None else state.fills
     pnl = state.equity - state.starting_balance
@@ -163,15 +169,21 @@ def format_summary(
     win = win_rate(window_fills)
     win_txt = f"{win:.1f}%" if win is not None else "n/a"
     dd = Decimal("0") if drawdown is None else drawdown
+    median_txt = f"{stats.median_net_edge:.4f}" if stats.median_net_edge is not None else "n/a"
+    acct = f" account={account_id}" if account_id else ""
     return (
-        f"{label} cycles={stats.cycles} scanned={stats.scanned} "
+        f"{label}{acct} cycles={stats.cycles} scanned={stats.scanned} "
         f"candidates={stats.candidates} booked={stats.booked} "
         f"rejected_edge={stats.rejected_edges} rejected_risk={stats.rejected_risk} "
         f"cash={state.cash:.4f} equity={state.equity:.4f} "
-        f"pnl={pnl:+.4f} ({pnl_pct:+.2f}%) win_rate={win_txt} "
+        f"pnl={pnl:+.4f} ({pnl_pct:+.2f}%) "
+        f"distance_to_2000={distance_to_target(state, config.target_balance):.4f} "
+        f"below_floor_n={stats.below_floor_n} median_net_edge={median_txt} "
+        f"win_rate={win_txt} "
         f"open={state.open_count}/{config.max_concurrent_open} "
         f"exposure={state.open_exposure:.4f} target={config.target_balance} ({progress:.2f}%) "
-        f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)}"
+        f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)} "
+        f"paused={int(paused)}"
     )
 
 
@@ -182,16 +194,43 @@ def format_daily(
     drawdown: Decimal | None = None,
     drawdown_review: bool = False,
     drawdown_halt: bool = False,
+    account_id: str | None = None,
+    paused: bool = False,
 ) -> str:
     win_txt = f"{snapshot.win_rate:.1f}%" if snapshot.win_rate is not None else "n/a"
     median_txt = f"{snapshot.median_net_edge:.4f}" if snapshot.median_net_edge is not None else "n/a"
     dd = Decimal("0") if drawdown is None else drawdown
+    distance = config.target_balance - snapshot.equity
+    acct = f" account={account_id}" if account_id else ""
     return (
-        f"DAILY {snapshot.date} fills={snapshot.fills} "
+        f"DAILY {snapshot.date}{acct} fills={snapshot.fills} "
         f"cash={snapshot.cash:.4f} equity={snapshot.equity:.4f} "
-        f"pnl={snapshot.pnl:+.4f} locked_edge={snapshot.locked_edge:+.4f} "
+        f"pnl={snapshot.pnl:+.4f} distance_to_2000={distance:.4f} "
+        f"locked_edge={snapshot.locked_edge:+.4f} "
         f"win_rate={win_txt} open={snapshot.open_count}/{config.max_concurrent_open} "
         f"exposure={snapshot.open_exposure:.4f} booked_notional={snapshot.booked_notional:.4f} "
         f"below_floor_n={snapshot.below_floor_n} median_net_edge={median_txt} "
-        f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)}"
+        f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)} "
+        f"paused={int(paused)}"
     )
+
+
+def format_rank_lines(
+    rows: list[tuple[int, str, LedgerState]],
+    target,
+) -> list[str]:
+    lines: list[str] = []
+    goal = Decimal(str(target))
+    for rank, account_id, state in rows:
+        progress = (state.equity / goal) * Decimal("100") if goal else Decimal("0")
+        lines.append(
+            f"RANK {rank} account={account_id} equity={state.equity:.4f} "
+            f"progress={progress:.2f}% distance_to_2000={goal - state.equity:.4f}"
+        )
+    winners = [account_id for _rank, account_id, state in rows if state.equity >= goal]
+    if winners:
+        lines.append(
+            f"WINNER account={winners[0]} target={goal} "
+            f"(first to target; report only; no fabricated fills)"
+        )
+    return lines

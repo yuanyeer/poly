@@ -76,10 +76,8 @@ def test_copy_follow_rules_v1_encoded_in_config():
     assert COPY_STOP_PEAK_DD == "0.05"
     assert COPY_STOP_PATH_DD == "0.05"
     cfg = load_config("config/paper.yaml")
-    assert cfg.session_timezone == "America/New_York"
-    assert cfg.session_start == "08:00"
-    assert cfg.session_end == "23:00"
-    assert cfg.session_start < cfg.session_end
+    assert cfg.session_enabled is False
+    assert cfg.idle_zero_fill_hours == 24
     copy = cfg.copy
     assert copy is not None
     assert copy.max_chase_slippage == Decimal(COPY_MAX_CHASE)
@@ -455,3 +453,7 @@ def test_paper_runner_emits_stop_follow_from_json_stub(tmp_path: Path):
     assert runner.copy_watchlist is not None
     assert runner.copy_watchlist.by_id("x-MoneyForWhiskas").active is False
     assert runner.ledger.state().fills == []
+    paused = runner.book.copy_for("x-MoneyForWhiskas")
+    other = runner.book.copy_for("goldfisherrr")
+    assert paused is not None and paused.paused is True
+    assert other is not None and other.paused is False

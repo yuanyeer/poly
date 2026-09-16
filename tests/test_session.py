@@ -94,18 +94,20 @@ def test_runner_stops_scanning_outside_ny_window(tmp_path):
     assert report.scanned == 0
     assert report.skipped_reason == "session_closed"
     assert report.in_session is False
-    assert runner.watch.zero_book_cycles == 0
+    # Wall-clock booked=0 still accrues when the optional gate skips a scan.
+    assert runner.watch.zero_book_cycles == 1
     assert "below_floor_n=" in report.daily_summary
     assert "median_net_edge=" in report.daily_summary
 
 
-def test_zero_book_streak_ignores_off_hours(tmp_path):
+def test_zero_book_streak_is_wall_clock_even_if_optional_gate_closed(tmp_path):
     cfg = paper_config(
         tmp_path,
         session_enabled=True,
         session_timezone="America/New_York",
         session_start="08:00",
         session_end="23:00",
+        idle_zero_fill_hours=24,
         poll_interval_seconds=0.0,
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
@@ -124,25 +126,39 @@ def test_zero_book_streak_ignores_off_hours(tmp_path):
     inside = runner.run_cycle()
     assert inside.booked == 0
     assert runner.watch.zero_book_cycles == 1
-    clock["now"] = _utc(2026, 7, 16, 3, 0)  # 23:00 EDT, closed
+    clock["now"] = _utc(2026, 7, 16, 3, 0)  # 23:00 EDT, optional gate closed
     outside = runner.run_cycle()
     assert outside.skipped_reason == "session_closed"
-    assert runner.watch.zero_book_cycles == 1
+    assert runner.watch.zero_book_cycles == 2
     assert stub.list_calls == 1
 
 
-def test_idle_zero_fill_trigger_after_two_sessions(tmp_path):
+def test_runner_scans_when_session_gate_is_off(tmp_path):
+    cfg = paper_config(tmp_path, session_enabled=False)
+    market = binary_market(yes_asks=[level("0.30", "20")], no_asks=[level("0.30", "20")])
+    stub = _StubMarket(market)
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=stub,  # type: ignore[arg-type]
+        now_fn=lambda: _utc(2026, 7, 15, 3, 0),  # 23:00 EDT; would be closed if gated
+    )
+    report = runner.run_cycle()
+    assert stub.list_calls == 1
+    assert report.skipped_reason != "session_closed"
+    assert report.in_session is True
+
+
+def test_idle_zero_fill_trigger_after_wall_clock_24h(tmp_path):
     cfg = paper_config(
         tmp_path,
-        session_enabled=True,
-        session_timezone="America/New_York",
-        session_start="08:00",
-        session_end="23:00",
-        idle_zero_fill_sessions=2,
+        session_enabled=False,
+        idle_zero_fill_hours=24,
+        poll_interval_seconds=0.0,
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
     stub = _StubMarket(market)
-    clock = {"now": _utc(2026, 7, 15, 14, 0)}
+    clock = {"now": _utc(2026, 7, 15, 0, 0)}
 
     def now_fn() -> datetime:
         return clock["now"]
@@ -153,17 +169,16 @@ def test_idle_zero_fill_trigger_after_two_sessions(tmp_path):
         market=stub,  # type: ignore[arg-type]
         now_fn=now_fn,
     )
-    runner.run_cycle()
-    clock["now"] = _utc(2026, 7, 16, 3, 0)
-    first_close = runner.run_cycle()
+    first = runner.run_cycle()
+    assert all("TRIGGER idle_zero_fill" not in line for line in first.messages)
+    clock["now"] = _utc(2026, 7, 15, 23, 59)
+    almost = runner.run_cycle()
+    assert all("TRIGGER idle_zero_fill" not in line for line in almost.messages)
+    clock["now"] = _utc(2026, 7, 16, 0, 0)
+    tripped = runner.run_cycle()
+    assert any("TRIGGER idle_zero_fill" in line for line in tripped.messages)
+    assert any("wall-clock continuous booked=0" in line for line in tripped.messages)
     assert runner.watch.zero_fill_sessions == 1
-    assert all("TRIGGER idle_zero_fill" not in line for line in first_close.messages)
-    clock["now"] = _utc(2026, 7, 16, 14, 0)
-    runner.run_cycle()
-    clock["now"] = _utc(2026, 7, 17, 3, 0)
-    second_close = runner.run_cycle()
-    assert runner.watch.zero_fill_sessions == 2
-    assert any("TRIGGER idle_zero_fill" in line for line in second_close.messages)
 
 
 def _dd(**kwargs):
@@ -304,19 +319,20 @@ def test_drawdown_halt_uses_live_peak(tmp_path):
     assert "halt=1" in report.summary
 
 
-def test_overnight_idle_cycles_do_not_grow_booked_zero_streak(tmp_path):
-    """Wall-clock overnight (end→next start) is not a 24h booked=0 meter."""
+def test_overnight_idle_cycles_count_toward_wall_clock_24h(tmp_path):
+    """Optional gate closed hours still accrue wall-clock booked=0."""
     cfg = paper_config(
         tmp_path,
         session_enabled=True,
         session_timezone="America/New_York",
         session_start="08:00",
         session_end="23:00",
+        idle_zero_fill_hours=24,
         poll_interval_seconds=0.0,
     )
     market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
     stub = _StubMarket(market)
-    clock = {"now": _utc(2026, 7, 16, 3, 0)}  # 23:00 EDT, closed
+    clock = {"now": _utc(2026, 7, 15, 14, 0)}  # in window, start streak
 
     def now_fn() -> datetime:
         return clock["now"]
@@ -327,24 +343,27 @@ def test_overnight_idle_cycles_do_not_grow_booked_zero_streak(tmp_path):
         market=stub,  # type: ignore[arg-type]
         now_fn=now_fn,
     )
-    runner.watch.zero_book_cycles = 4
+    runner.run_cycle()
+    assert runner.watch.zero_book_cycles == 1
     runner.watch.peak_equity = Decimal("200")
-    for hour in range(3, 12):  # 23:00 EDT … 07:00 EDT; 08:00 EDT = 12:00 UTC is open
+    for hour in range(3, 12):  # overnight closed hours
         clock["now"] = _utc(2026, 7, 16, hour, 0)
         report = runner.run_cycle()
         assert report.skipped_reason == "session_closed"
-        assert runner.watch.zero_book_cycles == 4
-        assert stub.list_calls == 0
-    # Drawdown still ticks off-hours against live ledger vs peak.
+        assert runner.watch.zero_book_cycles == 1 + (hour - 2)
+        assert stub.list_calls == 1
     assert runner.watch.peak_equity == Decimal("200")
     assert report.drawdown == Decimal("0")
 
 
-def test_session_watch_off_hours_do_not_count():
+def test_session_watch_wall_clock_idle():
     watch = SessionWatch()
-    watch.note_in_window(booked=0, did_scan=True)
+    start = _utc(2026, 7, 15, 0, 0)
+    assert watch.note_booked(0, start, idle_hours=24) is False
     assert watch.zero_book_cycles == 1
-    watch.note_off_window(idle_sessions=2)
-    watch.note_off_window(idle_sessions=2)
-    assert watch.zero_book_cycles == 1
+    assert watch.note_booked(0, _utc(2026, 7, 15, 23, 59), idle_hours=24) is False
+    assert watch.note_booked(0, _utc(2026, 7, 16, 0, 0), idle_hours=24) is True
     assert watch.zero_fill_sessions == 1
+    assert watch.note_booked(1, _utc(2026, 7, 16, 1, 0), idle_hours=24) is False
+    assert watch.zero_book_cycles == 0
+    assert watch.zero_since is None

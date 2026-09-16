@@ -52,8 +52,9 @@ def classify_drawdown(
     review_floor: Decimal,
     halt_floor: Decimal,
 ) -> DrawdownDecision:
-    """REVIEW: dd >= 10% OR equity < 180. HALT: dd >= 25% OR equity < 150.
+    """REVIEW: dd >= review_pct OR equity < review_floor (finance: 10% / 900).
 
+    HALT: dd >= halt_pct OR equity < halt_floor (finance: 25% / 750).
     Equity below the review floor must not by itself hard-stop.
     """
     if peak <= 0:

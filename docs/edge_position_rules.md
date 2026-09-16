@@ -89,10 +89,13 @@ abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE
 
 Do not apply `MIN_EDGE_TAKER` (0.5¢) to copy legs. Do not apply `COPY_MAX_CHASE` to lock-arb or maker legs.
 
-- Sleeve ≤ 30% of equity; 25% / 40% / ≤3 concurrent still apply
-- Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl ≤ 0
+- No global copy-sleeve 30%. Each leader has one independent paper ledger @ **1000 USD**; first to **2000 USD** wins. Risk vs that ledger's own equity. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
+- 25% / 40% / ≤3 concurrent still apply **per ledger** (own cash)
+- REVIEW / HARD (frozen): dd ≥ 10% OR equity < **900** → escalate, keep scanning that ledger; dd ≥ 25% OR equity < **750** → SKIP that ledger only
+- Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl ≤ 0 — **stops that copy ledger only** + rescan
 - Chase: abandon if `|fill_px − leader_px| + fee/share` > 0.01 (1¢)
 - Rescan replacements must have peak **and** path dd < 5% and still be profitable
+- Copy ledgers may scan **continuously** (24h) to mirror full-day leaders; primary is `x-MoneyForWhiskas`
 
 ## Position gates (all must pass)
 
@@ -115,37 +118,42 @@ def can_open(balance, event_exposure, open_opps, notional, event_id):
 
 ## Ledger
 
-Single local paper ledger; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
+Implemented lock-arb paper ledger remains a single local JSONL; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
+
+**Multi-ledger race:** independent paper ledgers (`arb-main` + one `copy-<leader>` per watchlist leader) each start at **1000 USD**; first to **2000 USD** wins. No cross-ledger cash, positions, exposure, or PnL. Source: [`docs/multi_ledger_race.md`](multi_ledger_race.md). Lock-arb numeric floors above are unchanged.
 
 ## 旁注 / ops note (clocks & kill triggers)
 
 Paper-only operational stop/review notes. They do **not** change edge floors, fee formulas, or position gates above.
 
-1. **Trading window (ops finalized)** — Default window is **America/New_York 08:00–23:00** (follows DST; roughly **UTC 12:00–03:00** EDT / **13:00–04:00** EST). **Not 24h.** China-local wall clock is **not** authoritative.
+1. **Trading window (ops frozen)** — **24h session.** No America/New_York 08:00–23:00 (or 09:00–22:00) gate. Default is continuous **24h** / **00:00–24:00 ET**. The prior ET window is **superseded**. China-local wall clock is **not** authoritative. Copy ledgers may scan continuously to mirror 24h leaders (priority: `x-MoneyForWhiskas` full-day activity).
 
-2. **连续 24h booked=0 (escalate)** — Escalate / strategy-review when `booked=0` accumulates to ~24h. The meter is still **cumulative time inside this trading window only** (**America/New_York 08:00–23:00**). Off-hours (scanner stopped / outside NY 08:00–23:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
+2. **连续 24h booked=0 (escalate)** — Escalate / strategy-review when `booked=0` accumulates to **calendar continuous 24h**. Off-hours are no longer excluded, because there are **no off-hours**. This is wall-clock / calendar time, not two clipped NY sessions.
 
-3. **Drawdown — two tiers (do not collapse)** — Live, real time: compare current paper ledger equity vs peak. This watch does **not** pause outside the trading window.
+3. **Drawdown — two tiers (do not collapse), per ledger** — Live, real time: compare that ledger's equity vs its own peak. A REVIEW/HARD trip applies to **that ledger only**.
 
-   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 180**. **Continue scanning; do NOT hard-stop.** This is the review gate only. 180 must never hard-stop alone.
-   - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 150**. Stops trading. **150 is intentionally below 180** so the review floor and the halt floor do not collide. The 25% / 150 halt does **not** replace the 10% / 180 REVIEW line.
+   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 900**. **Continue scanning that ledger; do NOT hard-stop.** This is the review gate only. 900 must never hard-stop alone.
+   - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 750**. **SKIP that ledger only.** **750 is intentionally below 900** so the review floor and the halt floor do not collide. The 25% / 750 halt does **not** replace the 10% / 900 REVIEW line.
 
-## Trading session (implemented)
+## Trading session (ops frozen; implemented)
 
-Default window is **America/New_York 08:00–23:00 local**. `zoneinfo` honors DST (EST/EDT). The interval is `[start, end)` on the local clock. Weekends use the same hours.
+**24h trading is frozen.** There is **no ET session gate**. Equivalent: **24h / 00:00–24:00 ET**. `config/paper.yaml` sets `session.enabled: false` and does **not** encode 08:00–23:00.
 
-- Encoded in `config/paper.yaml` → `session` so hours can be edited without code changes.
-- **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
-- Continuous `booked=0` **escalate** still uses **cumulative trading-window time** only (**America/New_York 08:00–23:00**), **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 23:00–08:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
-- Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). Two tiers — do not collapse:
-  - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **180**. **Continue scanning; do NOT hard-stop.**
-  - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **150**. Stops scanning (`SKIP drawdown_halt`) even while the session is open. **150 is intentionally below 180** so the floors do not collide.
+- `poly-paper --loop` keeps scanning around the clock (no `SKIP session_closed` for night / weekend ET hours).
+- `booked=0` **escalate** is **calendar continuous 24h**. Overnight and former “off-window” idle **do** count. After ~24h of continuous `booked=0`, log `TRIGGER idle_zero_fill`.
+- Copy ledgers may scan continuously so they can mirror 24h leaders. Primary: `x-MoneyForWhiskas` (full-day activity).
+- Drawdown watches **that ledger's equity vs its own peak** on every cycle (`(peak − equity) / peak`). Two tiers — do not collapse; apply **per ledger**:
+  - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **900**. **Continue scanning that ledger; do NOT hard-stop.**
+  - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **750**. `SKIP drawdown_halt` **that ledger only**. **750 is intentionally below 900** so the floors do not collide.
 
 ## Daily scan quality
 
-Every `DAILY` line includes:
+`SUMMARY` / `DAILY` must **split by `ledger_id`**. Every line includes:
 
+- `cash`, `equity`, `PnL`
+- `distance_to_2000` (multi-ledger race; first ledger to **2000 USD** wins)
 - `below_floor_n`: count of scanned markets whose best post-fee + depth-walk per-share net edge is below the applicable floor (still counted).
 - `median_net_edge`: median of those same per-share net edges, **including** below-floor prints.
+- review / halt flags for that ledger
 
 UTC day window for fills; edge tape resets on UTC date rollover.

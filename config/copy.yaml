@@ -2,8 +2,7 @@
 # Encodes poly 算法 v1: docs/copy_follow_rules.md.
 # No live orders. No fabricated fills. Display names are config keys until
 # wallet address mapping is resolved (TODO).
-# Session is America/New_York 08:00–23:00 (not 24h). TODO: may later narrow
-# that window from activity histograms of the leaders below.
+# 负责人 CONFIRMED 24h trading. Paper loop may scan 24h; no ET session gate.
 
 enabled: true
 

@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     if report.daily_summary:
         print(report.daily_summary)
     print(
-        "No real CLOB orders were sent. Target 1000 USD is a report-only milestone; "
+        "No real CLOB orders were sent. Target 2000 USD is a report-only race; "
         "fills are written only when live depth + fees clear the edge floors."
     )
     return 0

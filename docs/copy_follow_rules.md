@@ -3,7 +3,7 @@
 Allowed strategy type added by poly金融. Lock arb (YES+NO / complete-set) and maker rules unchanged.
 
 ## Watchlist (priority)
-1. `x-MoneyForWhiskas` (BTC 5m) — primary
+1. `x-MoneyForWhiskas` (BTC 5m) — primary; **full-day / 24h activity** (reason the project session is 24h)
 2. `0xcd30457c79` (BTC 5m)
 3. `goldfisherrr` (BTC 15m)
 
@@ -21,12 +21,19 @@ On each leader fill (token_id, side, size_hint, leader_px, ts):
 
 There is no YES+NO lock edge here; the chase gate replaces MIN_EDGE_TAKER for copy legs.
 
-## Position / risk (additive)
-- Per trade notional ≤ 25% cash
-- Same-event exposure ≤ 40% cash
-- Concurrent open opportunities ≤ 3
-- **Copy sleeve** total exposure ≤ 30% equity
+## Position / risk (per independent ledger; own equity only)
+Each watchlist leader has **one independent paper ledger** starting at **1000 USD**. There is **no global copy-sleeve 30%** across ledgers. No cross-ledger cash, positions, exposure, or PnL sharing.
+
+Risk is vs that ledger's own cash/equity:
+- Per trade notional ≤ 25% of that ledger's cash
+- Same-event exposure ≤ 40% of that ledger's cash
+- Concurrent open opportunities ≤ 3 on that ledger
+- Copy chase ≤ 1¢ on that copy ledger
+- REVIEW: peak dd ≥ 10% OR equity < **900** → escalate, keep scanning that ledger
+- HARD: peak dd ≥ 25% OR equity < **750** → SKIP that ledger only
 - Paper only; no live orders; no hand-edited ledger
+
+Race: first ledger to **2000 USD** wins. Rank by equity / `distance_to_2000`. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
 
 ## Stop-follow & rescan
 Stop mirroring a leader immediately if any:
@@ -34,12 +41,10 @@ Stop mirroring a leader immediately if any:
 - path drawdown ≥ 5%
 - month-to-date PnL ≤ 0
 
-Then trigger rescan for replacements: still trading, peak & path DD < 5%, and MTD profitable. poly 负责人 owns rescan cadence; engineering owns hooks.
+A breach **stops only that copy ledger** (other ledgers keep running) and triggers rescan for replacements: still trading, peak & path DD < 5%, and MTD profitable. poly 负责人 owns rescan cadence; engineering owns hooks.
 
 ## Trading window
-Default gate: `America/New_York 08:00–23:00` (DST). Not 24h.
-TODO / ops placeholder: may later narrow `[start, end)` from leader activity
-histograms for `x-MoneyForWhiskas`, `0xcd30457c79`, and `goldfisherrr`.
+**24h (ops frozen).** No America/New_York 08:00–23:00 session gate. Default is continuous **24h** / **00:00–24:00 ET**. Copy ledgers **may scan continuously** to mirror 24h leaders. Priority: `x-MoneyForWhiskas` full-day activity. `booked=0` escalate is calendar continuous 24h.
 
 ## Forbidden
 - Blind follow / addresses not on watchlist
