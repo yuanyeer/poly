@@ -44,7 +44,11 @@ class CycleReport:
 
 @dataclass
 class SessionWatch:
-    """In-window booked=0 streak + live peak/drawdown. Off-hours do not advance the streak."""
+    """Team metric: booked=0 streak is in-window only (not wall-clock 24h).
+
+    Overnight idle (session end → next start) must not increment zero_book_cycles
+    or zero_fill_sessions. Drawdown is live ledger equity vs peak every cycle.
+    """
 
     peak_equity: Decimal = Decimal("0")
     zero_book_cycles: int = 0

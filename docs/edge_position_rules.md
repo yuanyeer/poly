@@ -103,8 +103,8 @@ Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DS
 
 - Encoded in `config/paper.yaml` → `session` so hours can be edited without code changes.
 - **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
-- Continuous `booked=0` trigger lines accumulate **only inside this window**. Overnight idle (22:00–09:00) does not increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
-- Drawdown watches **live ledger equity vs peak** in real time (`(peak − equity) / peak`). It is not a delayed end-of-day mark. If drawdown ≥ `drawdown_halt_pct` (default 25%), scanning halts (`SKIP drawdown_halt`) even while the session is open.
+- Continuous `booked=0` trigger lines accumulate **only inside this window**, **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00; a cancelled Shanghai draft used 23:00–10:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
+- Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). It is not a delayed end-of-day mark. If drawdown ≥ `drawdown_halt_pct` (default 25%), scanning halts (`SKIP drawdown_halt`) even while the session is open.
 
 ## Daily scan quality
 

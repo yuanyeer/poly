@@ -52,8 +52,10 @@ min_fill_size: 1
 # (A later Shanghai 10:00–23:00 draft was cancelled; do not hardcode it.)
 # Weekends use the same hours. Start is inclusive; scanning stops at end.
 # Outside [start, end) --loop idles with SKIP session_closed (no scan).
-# Not 24h trading. booked=0 streak accumulates only while this window is open.
-# Drawdown watches live ledger equity vs peak (not a delayed EOD mark).
+# Not 24h trading.
+# booked=0 streak = in-window cycles only. Overnight idle (end→next start)
+# does NOT count — this is not a wall-clock 24h meter.
+# Drawdown: live ledger equity vs peak on every cycle, including off-hours.
 session:
   enabled: true
   timezone: America/New_York

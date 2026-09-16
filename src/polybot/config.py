@@ -58,9 +58,11 @@ class PaperConfig:
     session_timezone: str = "America/New_York"
     session_start: str = "09:00"
     session_end: str = "22:00"
-    # booked=0 streak counts only in-window cycles; ~two sessions trips idle trigger.
+    # booked=0 streak counts only in-window cycles (not wall-clock 24h).
+    # Overnight idle between end and next start does not increment it.
+    # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
     idle_zero_fill_sessions: int = 2
-    # Halt scanning when live ledger equity falls this far from peak.
+    # Live ledger equity vs peak, every cycle including off-hours.
     drawdown_halt_pct: Decimal = Decimal("0.25")
 
 

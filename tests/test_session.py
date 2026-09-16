@@ -186,6 +186,42 @@ def test_drawdown_halt_uses_live_peak(tmp_path):
     assert report.drawdown >= Decimal("0.25")
 
 
+def test_overnight_idle_cycles_do_not_grow_booked_zero_streak(tmp_path):
+    """Wall-clock overnight (end→next start) is not a 24h booked=0 meter."""
+    cfg = paper_config(
+        tmp_path,
+        session_enabled=True,
+        session_timezone="America/New_York",
+        session_start="09:00",
+        session_end="22:00",
+        poll_interval_seconds=0.0,
+    )
+    market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
+    stub = _StubMarket(market)
+    clock = {"now": _utc(2026, 7, 16, 2, 30)}  # 22:30 EDT, closed
+
+    def now_fn() -> datetime:
+        return clock["now"]
+
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=stub,  # type: ignore[arg-type]
+        now_fn=now_fn,
+    )
+    runner.watch.zero_book_cycles = 4
+    runner.watch.peak_equity = Decimal("200")
+    for hour in range(3, 13):
+        clock["now"] = _utc(2026, 7, 16, hour, 0)
+        report = runner.run_cycle()
+        assert report.skipped_reason == "session_closed"
+        assert runner.watch.zero_book_cycles == 4
+        assert stub.list_calls == 0
+    # Drawdown still ticks off-hours against live ledger vs peak.
+    assert runner.watch.peak_equity == Decimal("200")
+    assert report.drawdown == Decimal("0")
+
+
 def test_session_watch_off_hours_do_not_count():
     watch = SessionWatch()
     watch.note_in_window(booked=0, did_scan=True)
