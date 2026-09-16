@@ -85,6 +85,8 @@ class PaperConfig:
     skip_walk_if_raw_below_floor: bool = True
     # FINAL default from poly 负责人: America/New_York 08:00–23:00 local (DST).
     # Not 24h. Outside the window the loop must not scan.
+    # TODO: may later narrow from leader activity histograms
+    # (x-MoneyForWhiskas, 0xcd30457c79, goldfisherrr).
     session_enabled: bool = True
     session_timezone: str = "America/New_York"
     session_start: str = "08:00"

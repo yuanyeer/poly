@@ -1,6 +1,8 @@
 # Paper-only copy-trading observation. Referenced from config/paper.yaml.
 # No live orders. No fabricated fills. Display names are config keys until
 # wallet address mapping is resolved (TODO).
+# Session is America/New_York 08:00–23:00 (not 24h). TODO: may later narrow
+# that window from activity histograms of the leaders below.
 
 enabled: true
 

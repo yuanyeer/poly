@@ -37,7 +37,9 @@ Stop mirroring a leader immediately if any:
 Then trigger rescan for replacements: still trading, peak & path DD < 5%, and MTD profitable. poly 负责人 owns rescan cadence; engineering owns hooks.
 
 ## Trading window
-Default gate: `America/New_York 08:00–23:00` (DST). Not 24h. May narrow to leader activity distribution later (ops).
+Default gate: `America/New_York 08:00–23:00` (DST). Not 24h.
+TODO / ops placeholder: may later narrow `[start, end)` from leader activity
+histograms for `x-MoneyForWhiskas`, `0xcd30457c79`, and `goldfisherrr`.
 
 ## Forbidden
 - Blind follow / addresses not on watchlist

@@ -26,6 +26,8 @@ is a **TODO** — do not invent addresses.
   cash, same event ≤ 40% of cash, ≤ 3 concurrent opens
 - Arb edge floors stay at 0.5¢ taker / 0.2¢ maker
 - Mirror chase: abandon if `|fill_px − leader_px| + fee/share` **> 0.01 (1¢)**
+- Session default is America/New_York **08:00–23:00** (not 24h). TODO: may later
+  narrow from activity histograms of the three watchlist leaders.
 
 ## Stop-follow → rescan
 

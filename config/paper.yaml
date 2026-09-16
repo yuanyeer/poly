@@ -61,6 +61,8 @@ min_fill_size: 1
 #   hard halt / SKIP: peak DD ≥ 25% OR equity < 150 — stops trading
 #   150 is intentionally below 180 so the floors do not collide
 # booked=0 escalate still uses cumulative NY 08:00–23:00 window time only.
+# TODO: may later narrow [start, end) from leader activity histograms
+# (x-MoneyForWhiskas, 0xcd30457c79, goldfisherrr). Still not 24h.
 session:
   enabled: true
   timezone: America/New_York
