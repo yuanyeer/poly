@@ -494,7 +494,7 @@ class PaperRunner:
                     rejected += 1
                     logger.info("REJECT whiskas risk: %s", decision.reason)
                     continue
-                fill = account.ledger.append_fill(opportunity)
+                fill = account.ledger.append_fill(opportunity, ts=now.isoformat())
                 booked += 1
                 self.watches[account.account_id].observe_equity(account.state().equity)
                 line = (
@@ -535,6 +535,7 @@ class PaperRunner:
             cash_credit=credit,
             question=snapshot.question,
             notes=f"redeem winner={winner}",
+            ts=now.isoformat(),
         )
         line = (
             f"REDEEM whiskas_inventory {snapshot.question[:80]} winner={winner} "

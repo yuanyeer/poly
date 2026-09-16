@@ -246,17 +246,19 @@ class PaperLedger:
         cash_credit: Decimal,
         question: str = "",
         notes: str = "redeem",
+        ts: str | None = None,
+        fill_id: str | None = None,
     ) -> LedgerFill:
         records = self.verify()
         for record in records:
             if record.get("type") == REDEEM_TYPE and record.get("event_id") == event_id:
                 raise LedgerError(f"duplicate redemption {event_id}")
         prev_hash = str(records[-1]["hash"])
-        fill_id = uuid.uuid4().hex
+        fill_id = fill_id or uuid.uuid4().hex
         body: dict[str, Any] = {
             "type": REDEEM_TYPE,
             "fill_id": fill_id,
-            "ts": _now(),
+            "ts": ts or _now(),
             "opportunity_id": f"{WHISKAS_STRATEGY}:{event_id}:redeem",
             "event_id": event_id,
             "strategy": WHISKAS_STRATEGY,
@@ -274,7 +276,13 @@ class PaperLedger:
             fh.write(_dumps(record) + "\n")
         return self._fill_from_record(record)
 
-    def append_fill(self, opportunity: Opportunity) -> LedgerFill:
+    def append_fill(
+        self,
+        opportunity: Opportunity,
+        *,
+        ts: str | None = None,
+        fill_id: str | None = None,
+    ) -> LedgerFill:
         records = self.verify()
         prev_hash = str(records[-1]["hash"])
         if any(
@@ -285,11 +293,11 @@ class PaperLedger:
         if any(leg.side == "SELL" for leg in opportunity.legs):
             raise LedgerError("mid-round sells are forbidden")
 
-        fill_id = uuid.uuid4().hex
+        fill_id = fill_id or uuid.uuid4().hex
         body: dict[str, Any] = {
             "type": FILL_TYPE,
             "fill_id": fill_id,
-            "ts": _now(),
+            "ts": ts or _now(),
             "opportunity_id": opportunity.opportunity_id,
             "event_id": opportunity.event_id,
             "strategy": opportunity.strategy,

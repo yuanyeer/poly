@@ -1,0 +1,49 @@
+{
+  "label": "recorded BTC 5m Up/Down paper fixture — not a live CLOB order",
+  "paper_only": true,
+  "now": "2026-09-16T12:00:30+00:00",
+  "settle_now": "2026-09-16T12:05:01+00:00",
+  "winner": "Up",
+  "notes": [
+    "Round open 12:00:00Z, end 12:05:00Z (300s).",
+    "Book clock 12:00:30Z is +30s after open and 270s remaining (gates: +6s / stop ≤100s left).",
+    "Asks walk 50 shares on both Up and Down; VWAPs ≤0.89; combo ≤1.05.",
+    "Lock-arb decoy is cheap enough that arb-main WOULD book if booking were not paused."
+  ],
+  "market": {
+    "condition_id": "0xwhiskas-fixture-btc5m",
+    "question": "Bitcoin Up or Down - September 16, 8:00AM-8:05AM ET",
+    "slug": "btc-updown-5m-fixture",
+    "round_open": "2026-09-16T12:00:00+00:00",
+    "round_end": "2026-09-16T12:05:00+00:00",
+    "fee_rate": "0.02",
+    "taker_only": true,
+    "min_order_size": "1",
+    "up": {
+      "token_id": "tok-up-fixture",
+      "asks": [
+        ["0.48", "30"],
+        ["0.49", "40"]
+      ]
+    },
+    "down": {
+      "token_id": "tok-down-fixture",
+      "asks": [
+        ["0.46", "30"],
+        ["0.47", "40"]
+      ]
+    }
+  },
+  "lock_arb_decoy": {
+    "condition_id": "0xlock-decoy",
+    "question": "Lock-arb decoy (would book if arb-main were live)",
+    "yes_asks": [
+      ["0.30", "40"]
+    ],
+    "no_asks": [
+      ["0.30", "40"]
+    ],
+    "fee_rate": "0.02",
+    "taker_only": true
+  }
+}

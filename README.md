@@ -83,6 +83,14 @@ python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.j
 poly-paper --loop
 ```
 
+确定性纸面验收（录好的 BTC 5m fixture，不碰真盘、不下真单）。会在时间窗内 walk 双边 50 股并写 `whiskas-inv` 成交 + stub 结算兑付；`arb-main` 仍暂停记账：
+
+```bash
+poly-paper --fixture fixtures/whiskas_btc_5m_round.json \
+  --whiskas-ledger fixtures/whiskas-inv.paper-fills.jsonl \
+  --ledger fixtures/arb-main.paper-fills.jsonl
+```
+
 发现面会同时拉 CLOB `sampling-markets` + `markets`（可翻页）和 Gamma 活跃市场 / 多结果事件。YES+NO 与 complete-set 会在多个数量上 walk 盘口（不只看最深一档），门槛与风控不变。
 
 配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型（**DISABLED**）见 `docs/copy_follow_rules.md`。Whiskas inventory（**FROZEN**，allow-list `whiskas_inventory`，ledger `whiskas-inv`，paper only，**不是** copy-follow）见 [`docs/whiskas_inventory_rules.md`](docs/whiskas_inventory_rules.md)。赛跑（**仅 `whiskas-inv`，起始 2300，单轮 1200**；`arb-main` booking paused）见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)。
@@ -108,6 +116,8 @@ docs/copy_follow_rules.md    # 跟单规则 v1 — DISABLED / 移出允许名单
 docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)；允许名单含 whiskas_inventory
 docs/copy_trading.md         # copy 观察、停跟、重扫、mirror stub — DISABLED
 docs/whiskas_inventory_rules.md  # FROZEN inventory pairing (paper); ledger whiskas-inv; not copy-follow
+fixtures/whiskas_btc_5m_round.json   # recorded paper book for acceptance dry-run
+fixtures/whiskas-inv.paper-fills.jsonl  # sample whiskas-inv fills + stub redeem
 src/polybot/
   copy/                    # 历史 stub（watchlist / monitor / mirror）；非 ops 路径
   ledger/                  # 追加式 paper 账本

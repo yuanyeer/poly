@@ -51,3 +51,4 @@ Inventory / pairing: buy BOTH Up and Down each BTC 5m round. Pairing (~80–90% 
 ## Status
 FROZEN — allow-list `whiskas_inventory`, ledger `whiskas-inv` (main race). Paper only. Not copy-follow.
 Paper runtime is implemented (`config/paper.yaml` → `whiskas`; `copy.enabled` stays false). Knobs match this freeze.
+Acceptance dry-run (recorded book, not live CLOB): `poly-paper --fixture fixtures/whiskas_btc_5m_round.json`. Sample paper fills: `fixtures/whiskas-inv.paper-fills.jsonl`.
