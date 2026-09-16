@@ -101,8 +101,8 @@ Single local paper ledger; every fill: cash/position/PnL update from walked pric
 
 Paper-only operational stop/review notes. They do **not** change edge floors, fee formulas, or position gates above.
 
-1. **连续 24h booked=0** — Meter **cumulative configured-trading-window time only**. Off-hours when the scanner is stopped do **not** count toward the 24h. In practice this is about two consecutive trading sessions of continuous `booked=0`. Calendar / wall-clock days are not the meter.
+1. **Trading window (ops finalized)** — Default window is **America/New_York 09:00–22:00** (follows DST; roughly **UTC 13:00–02:00**). **Not 24h.** China-local wall clock is **not** authoritative.
 
-2. **Drawdown** — Still live, real time: compare current paper ledger balance vs peak, with a hard floor of **180** USD. This trigger does **not** pause outside the trading window.
+2. **连续 24h booked=0** — Meter **cumulative time inside this trading window only**. Off-hours (scanner stopped / outside NY 09:00–22:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
 
-3. **Trading window** — Set by ops (poly 负责人) to crypto-active hours. This doc only refers to the **configured trading window**. China-local wall clock is **not** the authority for when the scanner is on or when the 24h booked=0 meter runs.
+3. **Drawdown** — Live, real time: compare current paper ledger balance vs peak, with a hard floor of **180** USD. This trigger does **not** pause outside the trading window.
