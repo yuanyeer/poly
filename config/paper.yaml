@@ -56,8 +56,11 @@ min_fill_size: 1
 # booked=0 streak = in-window cycles only. Overnight idle (end→next start)
 # does NOT count — this is not a wall-clock 24h meter.
 # Drawdown: live ledger equity vs peak on every cycle, including off-hours.
-# REVIEW (keep scanning): dd >= 10% OR equity < 180. 180 is NOT a hard stop.
-# HARD HALT (SKIP):       dd >= 25% OR equity < 150.
+# Two tiers — do not collapse (ask poly金融):
+#   escalate / REVIEW: peak DD ≥ 10% OR equity < 180 — continue scanning; do NOT hard-stop
+#   hard halt / SKIP: peak DD ≥ 25% OR equity < 150 — stops trading
+#   150 is intentionally below 180 so the floors do not collide
+# booked=0 escalate still uses cumulative NY 09:00–22:00 window time only.
 session:
   enabled: true
   timezone: America/New_York

@@ -62,10 +62,9 @@ class PaperConfig:
     # Overnight idle between end and next start does not increment it.
     # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
     idle_zero_fill_sessions: int = 2
-    # Live ledger equity vs peak, every cycle including off-hours.
-    # REVIEW (escalate-to-finance, keep scanning): dd >= 10% OR equity < 180.
-    # HARD HALT (stop scanning): dd >= 25% OR equity < 150.
-    # 180 is review-only. Do not use 180 as a hard-stop floor.
+    # Two-tier ops (ask poly金融):
+    # REVIEW = peak DD ≥ 10% OR equity < 180 (keep scanning; 180 never SKIPs alone).
+    # SKIP   = peak DD ≥ 25% OR equity < 150. 150 is below 180 so floors do not collide.
     drawdown_review_pct: Decimal = Decimal("0.10")
     drawdown_review_floor_usd: Decimal = Decimal("180")
     drawdown_halt_pct: Decimal = Decimal("0.25")
