@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from polybot.ledger.store import PaperLedger
+from polybot.risk.drawdown import classify_drawdown
 from polybot.runner.paper import PaperRunner, SessionWatch
 from polybot.session import in_trading_window, local_now
 from tests.conftest import binary_market, level, paper_config
@@ -165,6 +166,79 @@ def test_idle_zero_fill_trigger_after_two_sessions(tmp_path):
     assert any("TRIGGER idle_zero_fill" in line for line in second_close.messages)
 
 
+def test_classify_review_is_not_silent_halt():
+    mid = classify_drawdown(
+        equity=Decimal("200"),
+        peak=Decimal("250"),
+        review_pct=Decimal("0.10"),
+        halt_pct=Decimal("0.25"),
+        hard_floor=Decimal("180"),
+    )
+    assert mid.drawdown == Decimal("0.2")
+    assert mid.review is True
+    assert mid.halt is False
+    assert mid.below_floor is False
+
+    halt = classify_drawdown(
+        equity=Decimal("200"),
+        peak=Decimal("400"),
+        review_pct=Decimal("0.10"),
+        halt_pct=Decimal("0.25"),
+        hard_floor=Decimal("180"),
+    )
+    assert halt.review is True
+    assert halt.halt is True
+
+    floor = classify_drawdown(
+        equity=Decimal("179"),
+        peak=Decimal("200"),
+        review_pct=Decimal("0.10"),
+        halt_pct=Decimal("0.25"),
+        hard_floor=Decimal("180"),
+    )
+    assert floor.below_floor is True
+    assert floor.review is True
+    assert floor.halt is True
+
+    exact_floor = classify_drawdown(
+        equity=Decimal("180"),
+        peak=Decimal("200"),
+        review_pct=Decimal("0.10"),
+        halt_pct=Decimal("0.25"),
+        hard_floor=Decimal("180"),
+    )
+    assert exact_floor.review is True  # 10% from peak
+    assert exact_floor.halt is False  # 180 is not below the floor
+    assert exact_floor.below_floor is False
+
+
+def test_review_10pct_keeps_scanning(tmp_path):
+    cfg = paper_config(
+        tmp_path,
+        session_enabled=False,
+        drawdown_review_pct=Decimal("0.10"),
+        drawdown_halt_pct=Decimal("0.25"),
+        drawdown_hard_floor_usd=Decimal("180"),
+    )
+    market = binary_market(yes_asks=[level("0.52", "20")], no_asks=[level("0.52", "20")])
+    stub = _StubMarket(market)
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=stub,  # type: ignore[arg-type]
+    )
+    runner.watch.peak_equity = Decimal("250")  # 20% dd, review only
+    report = runner.run_cycle()
+    assert report.drawdown_review is True
+    assert report.drawdown_halt is False
+    assert report.skipped_reason == ""
+    assert stub.list_calls == 1
+    assert any(line.startswith("REVIEW drawdown") for line in report.messages)
+    assert all("drawdown_halt" not in line for line in report.messages)
+    assert "review=1" in report.summary
+    assert "halt=0" in report.summary
+
+
 def test_drawdown_halt_uses_hard_floor(tmp_path):
     # Starting equity is 200; a floor of 201 trips even when pct halt is loose.
     cfg = paper_config(
@@ -204,6 +278,12 @@ def test_drawdown_halt_uses_live_peak(tmp_path):
     assert stub.list_calls == 0
     assert report.peak_equity == Decimal("400")
     assert report.drawdown >= Decimal("0.25")
+    assert report.drawdown_review is True
+    assert report.drawdown_halt is True
+    assert any(line.startswith("REVIEW drawdown") for line in report.messages)
+    assert any("SKIP drawdown_halt" in line and "hard stop" in line for line in report.messages)
+    assert "review=1" in report.summary
+    assert "halt=1" in report.summary
 
 
 def test_overnight_idle_cycles_do_not_grow_booked_zero_streak(tmp_path):

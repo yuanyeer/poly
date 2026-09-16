@@ -56,11 +56,15 @@ min_fill_size: 1
 # booked=0 streak = in-window cycles only. Overnight idle (end→next start)
 # does NOT count — this is not a wall-clock 24h meter.
 # Drawdown: live ledger equity vs peak on every cycle, including off-hours.
+# review_pct = escalate / flag for finance (do NOT treat this as a silent 25% kill).
+# halt_pct   = hard stop scanning/trading only.
+# hard_floor = both review and hard-halt if equity falls below this.
 session:
   enabled: true
   timezone: America/New_York
   start: "09:00"
   end: "22:00"
   idle_zero_fill_sessions: 2
+  drawdown_review_pct: 0.10
   drawdown_halt_pct: 0.25
   drawdown_hard_floor_usd: 180

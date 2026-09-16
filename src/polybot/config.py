@@ -63,8 +63,11 @@ class PaperConfig:
     # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
     idle_zero_fill_sessions: int = 2
     # Live ledger equity vs peak, every cycle including off-hours.
+    # REVIEW (escalate-to-finance): dd >= review_pct OR equity < hard floor.
+    # HARD HALT (stop scanning): dd >= halt_pct OR equity < hard floor.
+    # Do not silently raise the 10% review trigger to the 25% kill line.
+    drawdown_review_pct: Decimal = Decimal("0.10")
     drawdown_halt_pct: Decimal = Decimal("0.25")
-    # Ops hard floor from the merged docs note (PR #3).
     drawdown_hard_floor_usd: Decimal = Decimal("180")
 
 
@@ -134,8 +137,12 @@ def _enforce_floors(cfg: PaperConfig) -> None:
         raise ConfigError("max_unhedged_inventory cannot be negative")
     if cfg.idle_zero_fill_sessions < 1:
         raise ConfigError("idle_zero_fill_sessions must be >= 1")
+    if cfg.drawdown_review_pct <= 0 or cfg.drawdown_review_pct > 1:
+        raise ConfigError("drawdown_review_pct must be in (0, 1]")
     if cfg.drawdown_halt_pct <= 0 or cfg.drawdown_halt_pct > 1:
         raise ConfigError("drawdown_halt_pct must be in (0, 1]")
+    if cfg.drawdown_review_pct > cfg.drawdown_halt_pct:
+        raise ConfigError("drawdown_review_pct cannot exceed drawdown_halt_pct")
     if cfg.drawdown_hard_floor_usd <= 0:
         raise ConfigError("drawdown_hard_floor_usd must be > 0")
     _enforce_session(cfg)
@@ -198,6 +205,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         session_start=str(session.get("start") or "09:00"),
         session_end=str(session.get("end") or "22:00"),
         idle_zero_fill_sessions=max(1, int(session.get("idle_zero_fill_sessions", 2))),
+        drawdown_review_pct=_d(session.get("drawdown_review_pct", "0.10")),
         drawdown_halt_pct=_d(session.get("drawdown_halt_pct", "0.25")),
         drawdown_hard_floor_usd=_d(session.get("drawdown_hard_floor_usd", "180")),
     )

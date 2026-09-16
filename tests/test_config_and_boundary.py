@@ -27,6 +27,7 @@ def test_load_default_config():
     assert cfg.session_start == "09:00"
     assert cfg.session_end == "22:00"
     assert cfg.idle_zero_fill_sessions == 2
+    assert cfg.drawdown_review_pct == Decimal("0.10")
     assert cfg.drawdown_halt_pct == Decimal("0.25")
     assert cfg.drawdown_hard_floor_usd == Decimal("180")
 
@@ -70,6 +71,16 @@ def test_session_window_is_yaml_editable(tmp_path: Path):
     assert cfg.session_start == "10:00"
     assert cfg.session_end == "23:00"
     assert cfg.session_enabled is True
+
+
+def test_rejects_review_pct_above_halt(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["session"]["drawdown_review_pct"] = 0.30
+    raw["session"]["drawdown_halt_pct"] = 0.25
+    path = tmp_path / "raised.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ConfigError, match="drawdown_review_pct"):
+        load_config(path)
 
 
 def test_rejects_24h_session_window(tmp_path: Path):
