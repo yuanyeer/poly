@@ -41,6 +41,9 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if not args.verbose:
+        for noisy in ("httpx", "httpcore", "hpack"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         config = load_config(args.config)
         if args.ledger:
