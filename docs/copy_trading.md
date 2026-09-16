@@ -1,5 +1,10 @@
 # Copy-trading observation (paper-only)
 
+**DISABLED.** Owner is distilling lock-arb. `copy.enabled: false` fully skips
+the watchlist, per-leader copy ledgers, and `MirrorExecutor`. Do **not** leave
+copy accounts competing with `arb-main`. Hooks stay in-tree for a later
+re-enable; they are not on the runtime path.
+
 poly金融 allowed a new strategy type: **copy-trading（观察 → 小仓纸面）**.
 Existing YES+NO / complete-set / maker-spread arb is unchanged. Edge floors,
 fee formulas, and the 25% / 40% / ≤3 concurrent gates are **not** loosened.
@@ -21,9 +26,9 @@ is a **TODO** — do not invent addresses.
 
 ## Session
 
-**24h (ops frozen).** No ET 08:00–23:00 gate. Copy observation / future mirror
-hooks **may scan continuously** so they can follow `x-MoneyForWhiskas` full-day
-activity. `booked=0` escalate is calendar continuous 24h.
+**24h (ops frozen).** No ET 08:00–23:00 gate. Copy observation is **DISABLED**
+(`copy.enabled: false`); `arb-main` scans 24h. `booked=0` escalate is calendar
+continuous 24h.
 
 ## Limits
 

@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable
 
-from polybot.config import PaperConfig
+from polybot.config import PaperConfig, copy_runtime_enabled
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, MetricsProvider
 from polybot.copy.monitor import EVENT_STOP_FOLLOW, CopyEvent, CopyMonitor
 from polybot.copy.watchlist import Watchlist, load_watchlist
@@ -142,7 +142,7 @@ class PaperRunner:
         self._now = now_fn or utc_now
         self.copy_watchlist: Watchlist | None = None
         self.copy_monitor: CopyMonitor | None = None
-        if config.copy is not None and config.copy.enabled:
+        if copy_runtime_enabled(config.copy):
             provider: MetricsProvider
             if config.copy.metrics_stub is not None:
                 provider = JsonFileMetricsProvider(config.copy.metrics_stub)

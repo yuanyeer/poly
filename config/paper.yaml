@@ -3,11 +3,11 @@
 
 mode: paper
 
-# Finance freeze: each ledger starts 1000; first to 2000 wins (report only).
+# Finance freeze: single arb-main lock-arb ledger starts 1000; target 2000 (report only).
 ledger:
   starting_balance_usd: 1000
   target_balance_usd: 2000
-  path: data/paper_ledger.jsonl  # arb-main; copy ledgers are siblings copy-<leader>.jsonl
+  path: data/paper_ledger.jsonl  # arb-main only while copy is DISABLED
 
 endpoints:
   clob_host: https://clob.polymarket.com
@@ -63,11 +63,9 @@ session:
   drawdown_halt_pct: 0.25
   drawdown_halt_floor_usd: 750
 
-# Multi-ledger competition (isolated): arb-main + one copy ledger per watchlist
-# leader. Cash / exposure / concurrent / sleeve / REVIEW / HARD are per-ledger.
-# Copy-trading observation (paper-only hooks). YES+NO / complete-set arb unchanged.
-# Watchlist, stop-follow, and sleeve limits live in the referenced file.
-# Loader rejects a sleeve above 30% or loosened stop-follow thresholds.
-# No live orders. No fabricated fills. See docs/copy_trading.md.
+# Copy-trading is DISABLED (owner: distilling lock-arb). enabled: false fully
+# skips watchlist, per-leader copy ledgers, and MirrorExecutor. Do not compete
+# copy accounts. Hooks remain in-tree; see docs/copy_trading.md.
 copy:
+  enabled: false
   path: config/copy.yaml
