@@ -37,8 +37,8 @@ def stop_follow_reason(metrics: LeaderMetrics, copy: CopyConfig) -> str | None:
         return f"peak_dd {metrics.peak_dd} >= {copy.stop_peak_dd}"
     if metrics.path_dd >= copy.stop_path_dd:
         return f"path_dd {metrics.path_dd} >= {copy.stop_path_dd}"
-    if metrics.month_pnl < copy.month_pnl_below:
-        return f"month_pnl {metrics.month_pnl} < {copy.month_pnl_below}"
+    if metrics.month_pnl <= copy.month_pnl_below:
+        return f"month_pnl {metrics.month_pnl} <= {copy.month_pnl_below}"
     return None
 
 

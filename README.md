@@ -26,7 +26,8 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 poly金融新增允许策略：**跟单观察 → 小仓纸面**。YES+NO / complete-set 套利照旧。
 
 - 观察名单（优先级）：`x-MoneyForWhiskas`（BTC 5m，主领）、`0xcd30457c79`（BTC 5m）、`goldfisherrr`（BTC 15m）。配置键是展示名；钱包地址映射仍是 TODO。
-- 停跟：领单 `peak_dd ≥ 5%` **或** `path_dd ≥ 5%` **或** `month_pnl < 0` → 标记 inactive，打出 `STOP_FOLLOW` + `RESCAN_NEEDED`。
+- 停跟：领单 `peak_dd ≥ 5%` **或** `path_dd ≥ 5%` **或** `month_pnl ≤ 0`（含 0）→ 标记 inactive，打出 `STOP_FOLLOW` + `RESCAN_NEEDED`。
+- Mirror chase：`|fill_px − leader_px| + fee/share > 0.01`（1¢）则放弃该笔，不跟。
 - 重扫钩子：要求候选 `peak_dd` 与 `path_dd` 都 **< 5%** 且仍盈利。默认只记日志，没有 live 钱包扫描器。
 - 袖仓 ≤ 权益 **30%**；原有 25% / 40% / 同时 ≤3 仍然生效。
 - `MirrorExecutor` 是 stub：要求 delay + 深度 walk + 手续费，违规则拒绝；**不写账本、不下单**。

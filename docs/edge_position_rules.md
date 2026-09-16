@@ -90,7 +90,8 @@ abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE
 Do not apply `MIN_EDGE_TAKER` (0.5¢) to copy legs. Do not apply `COPY_MAX_CHASE` to lock-arb or maker legs.
 
 - Sleeve ≤ 30% of equity; 25% / 40% / ≤3 concurrent still apply
-- Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl < 0
+- Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl ≤ 0
+- Chase: abandon if `|fill_px − leader_px| + fee/share` > 0.01 (1¢)
 - Rescan replacements must have peak **and** path dd < 5% and still be profitable
 
 ## Position gates (all must pass)

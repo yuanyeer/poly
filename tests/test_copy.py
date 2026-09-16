@@ -7,7 +7,7 @@ import pytest
 import yaml
 
 from polybot.config import ConfigError, CopyConfig, load_config
-from polybot.copy.executor import MirrorExecutor, MirrorIntent
+from polybot.copy.executor import MirrorExecutor, MirrorIntent, chase_slippage
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, LeaderMetrics
 from polybot.copy.monitor import EVENT_RESCAN_NEEDED, EVENT_STOP_FOLLOW, CopyMonitor, stop_follow_reason
 from polybot.copy.rescan import LoggingRescanHook, RescanCriteria, filter_candidates
@@ -55,6 +55,9 @@ def _intent(**kwargs) -> MirrorIntent:
         delay_seconds=Decimal("2"),
         depth_walked=True,
         fees_applied=True,
+        leader_px=Decimal("0.50"),
+        fill_px=Decimal("0.50"),
+        fee_per_share=Decimal("0.001"),
     )
     values.update(kwargs)
     return MirrorIntent(**values)
@@ -123,6 +126,19 @@ def test_rejects_unquoted_hex_leader_id(tmp_path: Path):
         load_config(path)
 
 
+def test_rejects_loosened_chase_slippage(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/copy.yaml").read_text(encoding="utf-8"))
+    raw["max_chase_slippage"] = 0.02
+    copy_path = tmp_path / "copy.yaml"
+    copy_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    paper = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    paper["copy"] = {"path": str(copy_path)}
+    path = tmp_path / "paper.yaml"
+    path.write_text(yaml.safe_dump(paper), encoding="utf-8")
+    with pytest.raises(ConfigError, match="max_chase_slippage"):
+        load_config(path)
+
+
 def test_rejects_loosened_stop_follow_dd(tmp_path: Path):
     raw = yaml.safe_load(Path("config/copy.yaml").read_text(encoding="utf-8"))
     raw["stop_follow"]["peak_dd"] = 0.10
@@ -142,8 +158,9 @@ def test_rejects_loosened_stop_follow_dd(tmp_path: Path):
         ("0.05", "0.01", "10", "peak_dd"),
         ("0.01", "0.05", "10", "path_dd"),
         ("0.01", "0.01", "-0.01", "month_pnl"),
+        ("0.01", "0.01", "0", "month_pnl"),
         ("0.049", "0.049", "0.01", None),
-        ("0.00", "0.00", "0", None),
+        ("0.00", "0.00", "0.01", None),
     ],
 )
 def test_stop_follow_triggers(peak_dd: str, path_dd: str, month_pnl: str, expect: str | None):
@@ -284,6 +301,50 @@ def test_mirror_still_respects_same_event_and_concurrent():
     concurrent = exe.evaluate(_intent(notional=Decimal("20")), _state(open_count=3))
     assert not concurrent.allowed
     assert "concurrent" in concurrent.reason
+
+
+def test_chase_slippage_formula():
+    assert chase_slippage(Decimal("0.50"), Decimal("0.50"), Decimal("0.01")) == Decimal("0.01")
+    assert chase_slippage(Decimal("0.52"), Decimal("0.50"), Decimal("0.002")) == Decimal("0.022")
+
+
+def test_mirror_allows_chase_at_one_cent():
+    cfg = paper_config()
+    copy = CopyConfig(enabled=True, max_chase_slippage=Decimal("0.01"))
+    exe = MirrorExecutor(cfg, copy=copy)
+    # |0.505 - 0.50| + 0.005 = 0.01 → allowed (not greater than 1¢)
+    decision = exe.evaluate(
+        _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.505"), fee_per_share=Decimal("0.005")),
+        _state(),
+    )
+    assert decision.allowed
+
+
+def test_mirror_abandons_chase_over_one_cent():
+    cfg = paper_config()
+    copy = CopyConfig(enabled=True, max_chase_slippage=Decimal("0.01"))
+    exe = MirrorExecutor(cfg, copy=copy)
+    # |0.51 - 0.50| + 0.002 = 0.012 > 0.01
+    decision = exe.evaluate(
+        _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.51"), fee_per_share=Decimal("0.002")),
+        _state(),
+    )
+    assert not decision.allowed
+    assert "chase" in decision.reason
+    assert "abandon" in decision.reason
+    assert exe.execute(
+        _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.52"), fee_per_share=Decimal("0")),
+        _state(),
+    ).rejected
+
+
+def test_mirror_rejects_missing_chase_prices():
+    cfg = paper_config()
+    copy = CopyConfig(enabled=True)
+    exe = MirrorExecutor(cfg, copy=copy)
+    decision = exe.evaluate(_intent(leader_px=None, fill_px=None, fee_per_share=None), _state())
+    assert not decision.allowed
+    assert "leader_px" in decision.reason
 
 
 def test_mirror_rejects_missing_delay_depth_or_fees():

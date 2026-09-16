@@ -9,12 +9,17 @@ enabled: true
 #   single trade ≤ 25% of cash, same event ≤ 40% of cash, ≤ 3 concurrent.
 max_sleeve_pct: 0.30
 
+# Mirror chase (算法 v1): after delay Δt, walk our book; fill_px = VWAP;
+# fee per fd; abandon if |fill_px − leader_px| + fee/share > 0.01 (1¢).
+# Cannot be loosened above 1¢.
+max_chase_slippage: 0.01
+
 stop_follow:
-  # Fire STOP_FOLLOW + RESCAN_NEEDED when any trigger trips.
+  # Fire STOP_FOLLOW + RESCAN_NEEDED when any trigger trips (算法 v1).
   # Thresholds cannot be raised (that would loosen the stop).
   peak_dd: 0.05          # leader peak drawdown ≥ 5%
   path_dd: 0.05          # leader path drawdown ≥ 5%
-  month_pnl_below: 0     # month_pnl < 0
+  month_pnl_below: 0     # stop when month_pnl ≤ 0
 
 # Optional JSON stub for paper tests / offline observation.
 # A later scanner can replace JsonFileMetricsProvider. Not a live scraper.

@@ -13,6 +13,11 @@ logger = logging.getLogger(__name__)
 ZERO = Decimal("0")
 
 
+def chase_slippage(fill_px: Decimal, leader_px: Decimal, fee_per_share: Decimal) -> Decimal:
+    """|fill_px − leader_px| + fee/share after delay + depth walk (算法 v1)."""
+    return abs(fill_px - leader_px) + fee_per_share
+
+
 @dataclass(frozen=True)
 class MirrorIntent:
     """Proposed copy of a leader fill. Not an order and not a ledger fill.
@@ -21,6 +26,7 @@ class MirrorIntent:
     - apply observed delay vs the leader fill (`delay_seconds`)
     - walk book depth (never top-of-book); set `depth_walked=True` only after walk
     - apply CLOB fees (`fd.r` / `fd.to`); set `fees_applied=True` only after fees
+    - abandon if chase `|fill_px − leader_px| + fee/share` > 0.01 (1¢)
     """
 
     leader_id: str
@@ -30,6 +36,9 @@ class MirrorIntent:
     delay_seconds: Decimal | None
     depth_walked: bool
     fees_applied: bool
+    leader_px: Decimal | None = None
+    fill_px: Decimal | None = None
+    fee_per_share: Decimal | None = None
     notes: str = ""
 
 
@@ -47,7 +56,8 @@ class MirrorExecutor:
     """Paper-only stub. Evaluates sleeve + risk; never posts orders or writes fills.
 
     Rejects if the intent would violate:
-    - delay / depth-walk / fee requirements (documented, not simulated)
+    - delay / depth-walk / fee requirements
+    - chase `|fill_px − leader_px| + fee/share` > 1¢ (abandon; do not copy)
     - copy sleeve ≤ 30% of equity
     - existing 25% trade / 40% same-event / ≤3 concurrent caps
     """
@@ -78,6 +88,20 @@ class MirrorExecutor:
             return MirrorDecision(False, "mirror requires depth walk (never top-of-book only)")
         if not intent.fees_applied:
             return MirrorDecision(False, "mirror requires fees applied (fd.r / fd.to)")
+        if intent.leader_px is None or intent.fill_px is None or intent.fee_per_share is None:
+            return MirrorDecision(
+                False,
+                "mirror requires leader_px, fill_px (depth VWAP), and fee/share for chase cap",
+            )
+        chase = chase_slippage(intent.fill_px, intent.leader_px, intent.fee_per_share)
+        if chase > self.copy.max_chase_slippage:
+            return MirrorDecision(
+                False,
+                (
+                    f"chase slippage {chase} > {self.copy.max_chase_slippage} "
+                    f"(|fill_px-leader_px|+fee/share; abandon fill, do not copy)"
+                ),
+            )
         if intent.notional <= ZERO or intent.size <= ZERO:
             return MirrorDecision(False, "mirror notional/size must be positive")
         if not intent.event_id:

@@ -14,3 +14,5 @@ MAX_CONCURRENT_OPEN = 3
 COPY_MAX_SLEEVE_PCT = "0.30"
 COPY_STOP_PEAK_DD = "0.05"
 COPY_STOP_PATH_DD = "0.05"
+# |fill_px − leader_px| + fee/share; cannot be loosened above 1¢.
+COPY_MAX_CHASE_SLIPPAGE = "0.01"

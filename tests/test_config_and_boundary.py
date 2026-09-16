@@ -36,6 +36,8 @@ def test_load_default_config():
     assert cfg.copy.max_sleeve_pct == Decimal("0.30")
     assert cfg.copy.stop_peak_dd == Decimal("0.05")
     assert cfg.copy.stop_path_dd == Decimal("0.05")
+    assert cfg.copy.month_pnl_below == Decimal("0")
+    assert cfg.copy.max_chase_slippage == Decimal("0.01")
     assert [leader.id for leader in cfg.copy.leaders] == [
         "x-MoneyForWhiskas",
         "0xcd30457c79",

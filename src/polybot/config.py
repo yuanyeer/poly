@@ -10,6 +10,7 @@ import yaml
 from dotenv import load_dotenv
 
 from polybot import (
+    COPY_MAX_CHASE_SLIPPAGE,
     COPY_MAX_SLEEVE_PCT,
     COPY_STOP_PATH_DD,
     COPY_STOP_PEAK_DD,
@@ -49,6 +50,7 @@ class CopyConfig:
     stop_peak_dd: Decimal = Decimal(COPY_STOP_PEAK_DD)
     stop_path_dd: Decimal = Decimal(COPY_STOP_PATH_DD)
     month_pnl_below: Decimal = Decimal("0")
+    max_chase_slippage: Decimal = Decimal(COPY_MAX_CHASE_SLIPPAGE)
     leaders: tuple[CopyLeaderConfig, ...] = ()
     metrics_stub: Path | None = None
     source_path: Path | None = None
@@ -193,6 +195,10 @@ def _enforce_copy(copy: CopyConfig) -> None:
         raise ConfigError(f"copy stop path_dd cannot exceed {COPY_STOP_PATH_DD} (loosening forbidden)")
     if copy.month_pnl_below < 0:
         raise ConfigError("copy month_pnl_below cannot be negative (would loosen stop-follow)")
+    if copy.max_chase_slippage <= 0 or copy.max_chase_slippage > _d(COPY_MAX_CHASE_SLIPPAGE):
+        raise ConfigError(
+            f"copy max_chase_slippage cannot exceed {COPY_MAX_CHASE_SLIPPAGE} (1¢; loosening forbidden)"
+        )
     ids = [leader.id for leader in copy.leaders]
     if any(not leader_id.strip() for leader_id in ids):
         raise ConfigError("copy leader id is required")
@@ -266,6 +272,7 @@ def parse_copy_config(raw: dict[str, Any], *, source_path: Path | None = None) -
         stop_peak_dd=_d(stop.get("peak_dd", COPY_STOP_PEAK_DD)),
         stop_path_dd=_d(stop.get("path_dd", COPY_STOP_PATH_DD)),
         month_pnl_below=_d(stop.get("month_pnl_below", "0")),
+        max_chase_slippage=_d(raw.get("max_chase_slippage", COPY_MAX_CHASE_SLIPPAGE)),
         leaders=_parse_leaders(raw.get("leaders")),
         metrics_stub=stub,
         source_path=source_path,
