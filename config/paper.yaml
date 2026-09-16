@@ -48,8 +48,11 @@ min_fill_size: 1
 
 # FINAL trading window from poly 负责人.
 # Local wall clock in America/New_York; ZoneInfo honors DST (EST/EDT).
-# Outside [start, end) the loop stops scanning. Not 24h trading.
-# booked=0 streak accumulates only while this window is open.
+# timezone / start / end are YAML-only — edit here, no code change.
+# (A later Shanghai 10:00–23:00 draft was cancelled; do not hardcode it.)
+# Weekends use the same hours. Start is inclusive; scanning stops at end.
+# Outside [start, end) --loop idles with SKIP session_closed (no scan).
+# Not 24h trading. booked=0 streak accumulates only while this window is open.
 # Drawdown watches live ledger equity vs peak (not a delayed EOD mark).
 session:
   enabled: true

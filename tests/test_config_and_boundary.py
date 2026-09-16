@@ -57,6 +57,20 @@ def test_rejects_too_fast_polling(tmp_path: Path):
         load_config(path)
 
 
+def test_session_window_is_yaml_editable(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["session"]["timezone"] = "Asia/Shanghai"
+    raw["session"]["start"] = "10:00"
+    raw["session"]["end"] = "23:00"
+    path = tmp_path / "shanghai.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    cfg = load_config(path)
+    assert cfg.session_timezone == "Asia/Shanghai"
+    assert cfg.session_start == "10:00"
+    assert cfg.session_end == "23:00"
+    assert cfg.session_enabled is True
+
+
 def test_rejects_24h_session_window(tmp_path: Path):
     raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
     raw["session"]["start"] = "00:00"

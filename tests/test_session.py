@@ -30,6 +30,15 @@ def test_ny_window_respects_est_in_winter():
     assert not in_trading_window("America/New_York", "09:00", "22:00", _utc(2026, 1, 16, 3, 0))
 
 
+def test_yaml_timezone_asia_shanghai_is_honored_when_configured():
+    # Start inclusive: 10:00 CST = 02:00 UTC. Stop at 23:00 CST = 15:00 UTC.
+    # Weekends use the same hours (Saturday 2026-07-18).
+    assert in_trading_window("Asia/Shanghai", "10:00", "23:00", _utc(2026, 7, 18, 2, 0))
+    assert not in_trading_window("Asia/Shanghai", "10:00", "23:00", _utc(2026, 7, 18, 1, 59))
+    assert not in_trading_window("Asia/Shanghai", "10:00", "23:00", _utc(2026, 7, 18, 15, 0))
+    assert in_trading_window("Asia/Shanghai", "10:00", "23:00", _utc(2026, 7, 18, 14, 59))
+
+
 def test_disabled_session_is_always_open():
     assert in_trading_window(
         "America/New_York",
