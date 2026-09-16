@@ -3,7 +3,7 @@
 Allowed strategy type added by poly金融. Lock arb (YES+NO / complete-set) and maker rules unchanged.
 
 ## Watchlist (priority)
-1. `x-MoneyForWhiskas` (BTC 5m) — primary
+1. `x-MoneyForWhiskas` (BTC 5m) — primary; **full-day / 24h activity** (reason the project session is 24h)
 2. `0xcd30457c79` (BTC 5m)
 3. `goldfisherrr` (BTC 15m)
 
@@ -44,7 +44,7 @@ Stop mirroring a leader immediately if any:
 A breach **stops only that copy ledger** (other ledgers keep running) and triggers rescan for replacements: still trading, peak & path DD < 5%, and MTD profitable. poly 负责人 owns rescan cadence; engineering owns hooks.
 
 ## Trading window
-Default gate: `America/New_York 08:00–23:00` (DST). Not 24h. May narrow to leader activity distribution later (ops).
+**24h (ops frozen).** No America/New_York 08:00–23:00 session gate. Default is continuous **24h** / **00:00–24:00 ET**. Copy ledgers **may scan continuously** to mirror 24h leaders. Priority: `x-MoneyForWhiskas` full-day activity. `booked=0` escalate is calendar continuous 24h.
 
 ## Forbidden
 - Blind follow / addresses not on watchlist

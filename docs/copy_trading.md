@@ -15,9 +15,15 @@ is a **TODO** — do not invent addresses.
 
 | Priority | Key | Tag | Role |
 | --- | --- | --- | --- |
-| 1 | `x-MoneyForWhiskas` | BTC 5m | primary leader |
+| 1 | `x-MoneyForWhiskas` | BTC 5m | primary leader; **full-day / 24h** |
 | 2 | `0xcd30457c79` | BTC 5m | backup |
 | 3 | `goldfisherrr` | BTC 15m | backup |
+
+## Session
+
+**24h (ops frozen).** No ET 08:00–23:00 gate. Copy observation / future mirror
+hooks **may scan continuously** so they can follow `x-MoneyForWhiskas` full-day
+activity. `booked=0` escalate is calendar continuous 24h.
 
 ## Limits
 
