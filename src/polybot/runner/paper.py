@@ -10,6 +10,7 @@ from typing import Callable
 from polybot.config import PaperConfig
 from polybot.ledger.store import PaperLedger
 from polybot.market.client import LiveOrderForbidden, PaperMarketClient
+from polybot.risk.drawdown import DrawdownDecision, classify_drawdown
 from polybot.risk.gates import RiskEngine
 from polybot.runner.summary import SessionStats, build_daily_snapshot, format_daily, format_summary, utc_now
 from polybot.session import in_trading_window, local_now, session_label
@@ -40,6 +41,8 @@ class CycleReport:
     zero_fill_sessions: int = 0
     peak_equity: Decimal = Decimal("0")
     drawdown: Decimal = Decimal("0")
+    drawdown_review: bool = False
+    drawdown_halt: bool = False
 
 
 @dataclass
@@ -145,8 +148,17 @@ class PaperRunner:
         utc = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
         self.stats.reset_daily_edges(utc.date().isoformat())
         state = self.ledger.state()
-        drawdown = self.watch.observe_equity(state.equity)
+        self.watch.observe_equity(state.equity)
+        dd = classify_drawdown(
+            equity=state.equity,
+            peak=self.watch.peak_equity,
+            review_pct=self.config.drawdown_review_pct,
+            halt_pct=self.config.drawdown_halt_pct,
+            review_floor=self.config.drawdown_review_floor_usd,
+            halt_floor=self.config.drawdown_halt_floor_usd,
+        )
         messages = [self.status_line(state)]
+        self._log_drawdown(messages, state, dd)
         in_window = in_trading_window(
             self.config.session_timezone,
             self.config.session_start,
@@ -187,18 +199,10 @@ class PaperRunner:
                 skipped_reason=reason,
                 in_session=False,
                 now=now,
-                drawdown=drawdown,
+                drawdown=dd,
             )
 
-        if drawdown >= self.config.drawdown_halt_pct or state.equity <= self.config.drawdown_hard_floor_usd:
-            reason = "drawdown_halt"
-            line = (
-                f"SKIP {reason} peak={self.watch.peak_equity:.4f} equity={state.equity:.4f} "
-                f"dd={drawdown:.4f} halt={self.config.drawdown_halt_pct} "
-                f"floor={self.config.drawdown_hard_floor_usd}"
-            )
-            messages.append(line)
-            logger.info(line)
+        if dd.halt:
             self.watch.note_in_window(booked=0, did_scan=False)
             return self._finish_cycle(
                 state=state,
@@ -209,10 +213,10 @@ class PaperRunner:
                 skipped=1,
                 rejected_edges=0,
                 rejected_risk=0,
-                skipped_reason=reason,
+                skipped_reason="drawdown_halt",
                 in_session=True,
                 now=now,
-                drawdown=drawdown,
+                drawdown=dd,
             )
 
         targets = self._targets()
@@ -254,7 +258,7 @@ class PaperRunner:
                 if accepted:
                     booked += 1
                     state = self.ledger.state()
-                    drawdown = self.watch.observe_equity(state.equity)
+                    self.watch.observe_equity(state.equity)
                     line = (
                         f"BOOK {accepted.strategy} {snapshot.question[:80]} "
                         f"edge={accepted.edge:.4f} size={accepted.size} notional={accepted.notional:.4f}"
@@ -281,7 +285,17 @@ class PaperRunner:
             messages.append(idle)
             logger.info(idle)
         state = self.ledger.state()
-        drawdown = self.watch.observe_equity(state.equity)
+        self.watch.observe_equity(state.equity)
+        after = classify_drawdown(
+            equity=state.equity,
+            peak=self.watch.peak_equity,
+            review_pct=self.config.drawdown_review_pct,
+            halt_pct=self.config.drawdown_halt_pct,
+            review_floor=self.config.drawdown_review_floor_usd,
+            halt_floor=self.config.drawdown_halt_floor_usd,
+        )
+        if (after.review, after.halt) != (dd.review, dd.halt):
+            self._log_drawdown(messages, state, after)
         return self._finish_cycle(
             state=state,
             messages=messages,
@@ -291,10 +305,10 @@ class PaperRunner:
             skipped=skipped,
             rejected_edges=rejected_edges,
             rejected_risk=rejected_risk,
-            skipped_reason="",
+            skipped_reason="drawdown_halt" if after.halt else "",
             in_session=True,
             now=now,
-            drawdown=drawdown,
+            drawdown=after,
         )
 
     def _empty_report(self, state: LedgerState, message: str) -> CycleReport:
@@ -313,6 +327,26 @@ class PaperRunner:
             daily_summary=format_daily(daily_snap, self.config),
             peak_equity=self.watch.peak_equity,
         )
+
+    def _log_drawdown(self, messages: list[str], state: LedgerState, dd: DrawdownDecision) -> None:
+        if dd.review:
+            line = dd.review_line(
+                peak=self.watch.peak_equity,
+                equity=state.equity,
+                review_pct=self.config.drawdown_review_pct,
+                review_floor=self.config.drawdown_review_floor_usd,
+            )
+            messages.append(line)
+            logger.warning(line)
+        if dd.halt:
+            line = dd.halt_line(
+                peak=self.watch.peak_equity,
+                equity=state.equity,
+                halt_pct=self.config.drawdown_halt_pct,
+                halt_floor=self.config.drawdown_halt_floor_usd,
+            )
+            messages.append(line)
+            logger.error(line)
 
     def _daily_snapshot(self, state: LedgerState, now: datetime):
         return build_daily_snapshot(
@@ -336,12 +370,26 @@ class PaperRunner:
         skipped_reason: str,
         in_session: bool,
         now: datetime,
-        drawdown: Decimal,
+        drawdown: DrawdownDecision,
     ) -> CycleReport:
         messages.append(self.status_line(state))
-        summary = format_summary("SUMMARY", self.config, state, self.stats)
+        summary = format_summary(
+            "SUMMARY",
+            self.config,
+            state,
+            self.stats,
+            drawdown=drawdown.drawdown,
+            drawdown_review=drawdown.review,
+            drawdown_halt=drawdown.halt,
+        )
         daily_snap = self._daily_snapshot(state, now)
-        daily = format_daily(daily_snap, self.config)
+        daily = format_daily(
+            daily_snap,
+            self.config,
+            drawdown=drawdown.drawdown,
+            drawdown_review=drawdown.review,
+            drawdown_halt=drawdown.halt,
+        )
         day_key = daily_snap.date
         if self._day_key is None:
             self._day_key = day_key
@@ -369,7 +417,9 @@ class PaperRunner:
             zero_book_cycles=self.watch.zero_book_cycles,
             zero_fill_sessions=self.watch.zero_fill_sessions,
             peak_equity=self.watch.peak_equity,
-            drawdown=drawdown,
+            drawdown=drawdown.drawdown,
+            drawdown_review=drawdown.review,
+            drawdown_halt=drawdown.halt,
         )
 
     def _record_market_edge(self, snapshot: MarketSnapshot) -> None:

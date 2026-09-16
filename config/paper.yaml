@@ -67,5 +67,7 @@ session:
   start: "09:00"
   end: "22:00"
   idle_zero_fill_sessions: 2
+  drawdown_review_pct: 0.10
+  drawdown_review_floor_usd: 180
   drawdown_halt_pct: 0.25
-  drawdown_hard_floor_usd: 180
+  drawdown_halt_floor_usd: 150

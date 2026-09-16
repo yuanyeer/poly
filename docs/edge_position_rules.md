@@ -107,7 +107,7 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 3. **Drawdown — two tiers (do not collapse)** — Live, real time: compare current paper ledger equity vs peak. This watch does **not** pause outside the trading window.
 
-   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 180**. **Continue scanning; do NOT hard-stop.** This is the review gate only.
+   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 180**. **Continue scanning; do NOT hard-stop.** This is the review gate only. 180 must never hard-stop alone.
    - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 150**. Stops trading. **150 is intentionally below 180** so the review floor and the halt floor do not collide. The 25% / 150 halt does **not** replace the 10% / 180 REVIEW line.
 
 ## Trading session (implemented)

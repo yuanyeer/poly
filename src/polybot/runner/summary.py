@@ -152,6 +152,9 @@ def format_summary(
     stats: SessionStats,
     *,
     fills: list[LedgerFill] | None = None,
+    drawdown: Decimal | None = None,
+    drawdown_review: bool = False,
+    drawdown_halt: bool = False,
 ) -> str:
     window_fills = fills if fills is not None else state.fills
     pnl = state.equity - state.starting_balance
@@ -159,6 +162,7 @@ def format_summary(
     progress = (state.equity / config.target_balance) * Decimal("100")
     win = win_rate(window_fills)
     win_txt = f"{win:.1f}%" if win is not None else "n/a"
+    dd = Decimal("0") if drawdown is None else drawdown
     return (
         f"{label} cycles={stats.cycles} scanned={stats.scanned} "
         f"candidates={stats.candidates} booked={stats.booked} "
@@ -166,18 +170,28 @@ def format_summary(
         f"cash={state.cash:.4f} equity={state.equity:.4f} "
         f"pnl={pnl:+.4f} ({pnl_pct:+.2f}%) win_rate={win_txt} "
         f"open={state.open_count}/{config.max_concurrent_open} "
-        f"exposure={state.open_exposure:.4f} target={config.target_balance} ({progress:.2f}%)"
+        f"exposure={state.open_exposure:.4f} target={config.target_balance} ({progress:.2f}%) "
+        f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)}"
     )
 
 
-def format_daily(snapshot: DailySnapshot, config: PaperConfig) -> str:
+def format_daily(
+    snapshot: DailySnapshot,
+    config: PaperConfig,
+    *,
+    drawdown: Decimal | None = None,
+    drawdown_review: bool = False,
+    drawdown_halt: bool = False,
+) -> str:
     win_txt = f"{snapshot.win_rate:.1f}%" if snapshot.win_rate is not None else "n/a"
     median_txt = f"{snapshot.median_net_edge:.4f}" if snapshot.median_net_edge is not None else "n/a"
+    dd = Decimal("0") if drawdown is None else drawdown
     return (
         f"DAILY {snapshot.date} fills={snapshot.fills} "
         f"cash={snapshot.cash:.4f} equity={snapshot.equity:.4f} "
         f"pnl={snapshot.pnl:+.4f} locked_edge={snapshot.locked_edge:+.4f} "
         f"win_rate={win_txt} open={snapshot.open_count}/{config.max_concurrent_open} "
         f"exposure={snapshot.open_exposure:.4f} booked_notional={snapshot.booked_notional:.4f} "
-        f"below_floor_n={snapshot.below_floor_n} median_net_edge={median_txt}"
+        f"below_floor_n={snapshot.below_floor_n} median_net_edge={median_txt} "
+        f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)}"
     )
