@@ -56,11 +56,15 @@ min_fill_size: 1
 # booked=0 streak = in-window cycles only. Overnight idle (end→next start)
 # does NOT count — this is not a wall-clock 24h meter.
 # Drawdown: live ledger equity vs peak on every cycle, including off-hours.
+# REVIEW (keep scanning): dd >= 10% OR equity < 180. 180 is NOT a hard stop.
+# HARD HALT (SKIP):       dd >= 25% OR equity < 150.
 session:
   enabled: true
   timezone: America/New_York
   start: "09:00"
   end: "22:00"
   idle_zero_fill_sessions: 2
+  drawdown_review_pct: 0.10
+  drawdown_review_floor_usd: 180
   drawdown_halt_pct: 0.25
-  drawdown_hard_floor_usd: 180
+  drawdown_halt_floor_usd: 150

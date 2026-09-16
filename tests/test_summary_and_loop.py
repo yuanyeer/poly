@@ -44,6 +44,8 @@ def test_summary_reports_pnl_and_win_rate():
     assert "win_rate=100.0%" in line
     assert "exposure=8.0000" in line
     assert "open=1/3" in line
+    assert "review=0" in line
+    assert "halt=0" in line
 
 
 def test_daily_snapshot_uses_utc_day_window_only():
