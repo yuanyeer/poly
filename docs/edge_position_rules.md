@@ -4,6 +4,13 @@ Aligned with poly金融 allow/deny list. 加密算法师: hang these as validato
 
 This file is the frozen source of truth for paper-mode edge, fee, depth-walk, and position gates. Thresholds and formulas below must not be loosened.
 
+> **Allow list (finance freeze 2026-09-16):** lock arb (YES+NO / complete-set)
+> + maker spread **only**. Copy-follow is **ENTIRELY DISABLED** (watchlist,
+> copy ledgers, mirror, stop-follow / rescan) until poly金融 re-opens the type.
+> Race is the single **`main_arb`** ledger: start **1000** → target **2000**,
+> 24h paper, REVIEW **10% / <900**, HARD **25% / <750**. Lock-arb floors below
+> are unchanged.
+
 ## Constants
 
 - `START_BALANCE = 200` USD (paper only)
@@ -13,7 +20,7 @@ This file is the frozen source of truth for paper-mode edge, fee, depth-walk, an
 - `MAX_OPEN_OPPS = 3`
 - `MIN_EDGE_TAKER = 0.005`  # 0.5¢ — lock arb (YES+NO / complete-set) only
 - `MIN_EDGE_MAKER = 0.002`  # 0.2¢
-- `COPY_MAX_CHASE = 0.01`  # 1¢ per share; copy-follow legs only (see `docs/copy_follow_rules.md`)
+- ~~`COPY_MAX_CHASE = 0.01`~~  # **DISABLED** — historical 1¢ copy-follow chase only; not on the allow list (see `docs/copy_follow_rules.md`)
 
 ## Fee (CLOB V2 style)
 
@@ -42,6 +49,8 @@ def walk_asks(book, size):
 Same for bids when selling.
 
 ## Allowed strategies
+
+**Live allow list:** A + B + C only. Section D is **DISABLED** (struck below).
 
 ### A) YES+NO lock (binary)
 
@@ -75,27 +84,33 @@ Post-only quotes only when:
 
 Paper fill: match only when live book trades through our price (or sim fill model agreed with eng).
 
-### D) Copy-follow (**DISABLED**; paper-only hooks remain in-tree)
+### D) ~~Copy-follow (newly allowed; paper-only hooks)~~ — **DISABLED / removed from allow list**
 
-**Owner: distilling lock-arb. `copy.enabled: false` skips watchlist, copy ledgers, and `MirrorExecutor`.** Do not compete copy accounts. Source of truth when re-enabled: [`docs/copy_follow_rules.md`](copy_follow_rules.md). Lock arb (YES+NO / complete-set) and maker floors above are unchanged.
+> **Not allowed.** Watchlist, copy ledgers, mirror, and stop-follow / rescan
+> are **paused** until poly金融 re-opens the type. Historical text is kept
+> below so git history and this freeze file stay readable. Source (disabled):
+> [`docs/copy_follow_rules.md`](copy_follow_rules.md). Observation hooks
+> (disabled): `docs/copy_trading.md`.
 
-Copy legs have no YES+NO lock edge. The chase gate **replaces `MIN_EDGE_TAKER` for copy legs only**:
+~~Copy legs have no YES+NO lock edge. The chase gate **replaces `MIN_EDGE_TAKER` for copy legs only**:~~
 
 ```
-# reject fill if
-abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE
+# HISTORICAL / DISABLED — do not treat as an allow-list exception
+# abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE
 # COPY_MAX_CHASE = 0.01 (1¢) per share
 ```
 
-Do not apply `MIN_EDGE_TAKER` (0.5¢) to copy legs. Do not apply `COPY_MAX_CHASE` to lock-arb or maker legs.
+Do **not** apply `COPY_MAX_CHASE` to lock-arb or maker legs. Do **not** open
+copy legs. Lock-arb still uses `MIN_EDGE_TAKER` (0.5¢); maker still uses
+`MIN_EDGE_MAKER` (0.2¢).
 
-- No global copy-sleeve 30%. Each leader has one independent paper ledger @ **1000 USD**; first to **2000 USD** wins. Risk vs that ledger's own equity. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
-- 25% / 40% / ≤3 concurrent still apply **per ledger** (own cash)
-- REVIEW / HARD (frozen): dd ≥ 10% OR equity < **900** → escalate, keep scanning that ledger; dd ≥ 25% OR equity < **750** → SKIP that ledger only
-- Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl ≤ 0 — **stops that copy ledger only** + rescan
-- Chase: abandon if `|fill_px − leader_px| + fee/share` > 0.01 (1¢)
-- Rescan replacements must have peak **and** path dd < 5% and still be profitable
-- Copy path is **DISABLED** (`copy.enabled: false`); only `arb-main` scans 24h
+- ~~No global copy-sleeve 30%. Each leader has one independent paper ledger @ **1000 USD**.~~ Copy ledgers are **paused**. Race is **`main_arb` only** @ **1000 USD**; first to **2000 USD** wins. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
+- 25% / 40% / ≤3 concurrent still apply on **`main_arb`** (own cash)
+- REVIEW / HARD (frozen): dd ≥ 10% OR equity < **900** → escalate, keep scanning `main_arb`; dd ≥ 25% OR equity < **750** → SKIP `main_arb`
+- ~~Stop-follow: leader peak_dd ≥ 5% OR path_dd ≥ 5% OR month_pnl ≤ 0 — stops that copy ledger only + rescan~~ — **DISABLED**
+- ~~Chase: abandon if `|fill_px − leader_px| + fee/share` > 0.01 (1¢)~~ — **DISABLED**
+- ~~Rescan replacements must have peak and path dd < 5% and still be profitable~~ — **DISABLED**
+- ~~Copy ledgers may scan continuously (24h) to mirror full-day leaders; primary is `x-MoneyForWhiskas`~~ — **DISABLED**
 
 ## Position gates (all must pass)
 
@@ -115,25 +130,26 @@ def can_open(balance, event_exposure, open_opps, notional, event_id):
 - Sweeping illiquid / near-resolution books
 - Mutating ledger balance by hand / fake fills
 - Any live/real-money order in this phase
+- Copy-follow / watchlist / mirror / copy-ledger activity while that type is **DISABLED**
 
 ## Ledger
 
 Implemented lock-arb paper ledger remains a single local JSONL; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
 
-**Race (copy DISABLED):** the single `arb-main` lock-arb ledger starts at **1000 USD**; target **2000 USD** (report only). Copy ledgers are not opened. Source: [`docs/multi_ledger_race.md`](multi_ledger_race.md). Lock-arb numeric floors above are unchanged.
+**Race (single ledger):** **`main_arb`** (`arb-main`) starts at **1000 USD**; first to **2000 USD** wins. ~~`copy-<leader>` ledgers per watchlist leader~~ are **DISABLED / paused** until finance re-opens the type. No cross-ledger cash, positions, exposure, or PnL. Source: [`docs/multi_ledger_race.md`](multi_ledger_race.md). Lock-arb numeric floors above are unchanged.
 
 ## 旁注 / ops note (clocks & kill triggers)
 
 Paper-only operational stop/review notes. They do **not** change edge floors, fee formulas, or position gates above.
 
-1. **Trading window (ops frozen)** — **24h session.** No America/New_York 08:00–23:00 (or 09:00–22:00) gate. Default is continuous **24h** / **00:00–24:00 ET**. The prior ET window is **superseded**. China-local wall clock is **not** authoritative. Copy-trading is **DISABLED**; only `arb-main` scans.
+1. **Trading window (ops frozen)** — **24h paper session.** No America/New_York 08:00–23:00 (or 09:00–22:00) gate. Default is continuous **24h** / **00:00–24:00 ET**. The prior ET window is **superseded**. China-local wall clock is **not** authoritative. ~~Copy ledgers may scan continuously to mirror 24h leaders (priority: `x-MoneyForWhiskas` full-day activity).~~ Copy ledgers and watchlist are **paused**.
 
 2. **连续 24h booked=0 (escalate)** — Escalate / strategy-review when `booked=0` accumulates to **calendar continuous 24h**. Off-hours are no longer excluded, because there are **no off-hours**. This is wall-clock / calendar time, not two clipped NY sessions.
 
-3. **Drawdown — two tiers (do not collapse), per ledger** — Live, real time: compare that ledger's equity vs its own peak. A REVIEW/HARD trip applies to **that ledger only**.
+3. **Drawdown — two tiers (do not collapse), `main_arb` only** — Live, real time: compare **`main_arb`** equity vs its own peak. Copy ledgers are **not** in the race.
 
-   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 900**. **Continue scanning that ledger; do NOT hard-stop.** This is the review gate only. 900 must never hard-stop alone.
-   - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 750**. **SKIP that ledger only.** **750 is intentionally below 900** so the review floor and the halt floor do not collide. The 25% / 750 halt does **not** replace the 10% / 900 REVIEW line.
+   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 900**. **Continue scanning `main_arb`; do NOT hard-stop.** This is the review gate only. 900 must never hard-stop alone.
+   - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 750**. **SKIP `main_arb`.** **750 is intentionally below 900** so the review floor and the halt floor do not collide. The 25% / 750 halt does **not** replace the 10% / 900 REVIEW line.
 
 ## Trading session (ops frozen; implemented)
 
@@ -141,17 +157,17 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 - `poly-paper --loop` keeps scanning around the clock (no `SKIP session_closed` for night / weekend ET hours).
 - `booked=0` **escalate** is **calendar continuous 24h**. Overnight and former “off-window” idle **do** count. After ~24h of continuous `booked=0`, log `TRIGGER idle_zero_fill`.
-- Copy-trading is **DISABLED**. Only `arb-main` scans 24h.
-- Drawdown watches **that ledger's equity vs its own peak** on every cycle (`(peak − equity) / peak`). Two tiers — do not collapse; apply **per ledger**:
-  - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **900**. **Continue scanning that ledger; do NOT hard-stop.**
-  - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **750**. `SKIP drawdown_halt` **that ledger only**. **750 is intentionally below 900** so the floors do not collide.
+- ~~Copy ledgers may scan continuously so they can mirror 24h leaders. Primary: `x-MoneyForWhiskas` (full-day activity).~~ Copy ledgers, watchlist, mirror, and stop-follow / rescan are **DISABLED**.
+- Drawdown watches **`main_arb` equity vs its own peak** on every cycle (`(peak − equity) / peak`). Two tiers — do not collapse:
+  - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **900**. **Continue scanning `main_arb`; do NOT hard-stop.**
+  - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **750**. `SKIP drawdown_halt` on **`main_arb`**. **750 is intentionally below 900** so the floors do not collide.
 
 ## Daily scan quality
 
 `SUMMARY` / `DAILY` must **split by `ledger_id`**. Every line includes:
 
 - `cash`, `equity`, `PnL`
-- `distance_to_2000` (`arb-main` race; target **2000 USD**)
+- `distance_to_2000` (race on **`main_arb` only**; first to **2000 USD** wins)
 - `below_floor_n`: count of scanned markets whose best post-fee + depth-walk per-share net edge is below the applicable floor (still counted).
 - `median_net_edge`: median of those same per-share net edges, **including** below-floor prints.
 - review / halt flags for that ledger

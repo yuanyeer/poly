@@ -1,34 +1,59 @@
-# Copy-follow rules v1 (freeze candidate 2026-09-16)
+# Copy-follow rules v1 — **DISABLED**
 
-**DISABLED.** Owner is distilling lock-arb. Runtime flag `copy.enabled: false`
-skips watchlist / copy ledgers / `MirrorExecutor`. These rules stay documented
-for a later re-enable. The live paper race is **arb-main only** (1000 → 2000).
+> **DISABLED / ENTIRELY REMOVED FROM ALLOW LIST (finance freeze 2026-09-16).**
+>
+> Copy-trading is **entirely off**: watchlist, copy ledgers (`copy-<leader>` /
+> `copy:<leader>`), mirror fills, and stop-follow / rescan are **paused**.
+> Playbook is being distilled separately. Do **not** treat this file as an
+> allowed strategy type until **poly金融** re-opens it.
+>
+> **Current allow list:** lock arb (YES+NO / complete-set) + maker spread only.
+> **Race:** single **`main_arb`** (`arb-main`) ledger, start **1000** → target
+> **2000**. 24h paper. REVIEW **10% / equity < 900**. HARD **25% / equity < 750**.
+> Lock-arb floors unchanged (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢).
+>
+> This file is kept for history. Do not delete it. Struck entries below are
+> **not** live.
 
-Allowed strategy type added by poly金融. Lock arb (YES+NO / complete-set) and maker rules unchanged.
+Allowed strategy type ~~added~~ **removed** by poly金融. Lock arb (YES+NO /
+complete-set) and maker rules unchanged and remain the only allowed types.
 
-## Watchlist (priority)
-1. `x-MoneyForWhiskas` (BTC 5m) — primary; **full-day / 24h activity** (reason the project session is 24h)
-2. `0xcd30457c79` (BTC 5m)
-3. `goldfisherrr` (BTC 15m)
+## Watchlist (priority) — **PAUSED / DISABLED**
 
-Only these addresses (or successors after rescan). No blind follow.
+~~1. `x-MoneyForWhiskas` (BTC 5m) — primary; **full-day / 24h activity**~~
+~~2. `0xcd30457c79` (BTC 5m)~~
+~~3. `goldfisherrr` (BTC 15m)~~
 
-## Mirror fill
+Watchlist is **paused until finance re-opens the type**. No follow. No
+successors. No rescan.
+
+## Mirror fill — **DISABLED**
+
+Historical paper rule (do not execute):
+
 On each leader fill (token_id, side, size_hint, leader_px, ts):
 1. Wait delay `Δt` (config; default 1–3s paper) to model latency.
 2. Walk our book for the same side/outcome with depth walk (not top-of-book).
 3. `fill_px = VWAP`; `fee = size * r * p * (1-p)` if taker (`fd.to`).
 4. **Chase gate (copy quality):** reject fill if
-   `abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE`  
+   `abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE`
    where `COPY_MAX_CHASE = 0.01` (1¢) per share.
 5. Size = min(leader remaining mirror size, risk caps, available depth).
 
-There is no YES+NO lock edge here; the chase gate replaces MIN_EDGE_TAKER for copy legs.
+There is no YES+NO lock edge here; the chase gate replaced `MIN_EDGE_TAKER`
+for copy legs **when the type was allowed**. It is **not** an allow-list
+exception now.
 
-## Position / risk (per independent ledger; own equity only)
-Each watchlist leader has **one independent paper ledger** starting at **1000 USD**. There is **no global copy-sleeve 30%** across ledgers. No cross-ledger cash, positions, exposure, or PnL sharing.
+## Position / risk (archived copy ledgers)
 
-Risk is vs that ledger's own cash/equity:
+Each watchlist leader **had** one independent paper ledger starting at
+**1000 USD**. Those copy ledgers are **paused**. There is **no** live copy
+sleeve. No cross-ledger cash, positions, exposure, or PnL sharing.
+
+Race **now:** **`main_arb` only**. Start **1000**, first to **2000** wins.
+Rank by equity / `distance_to_2000`. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
+
+Historical per-copy-ledger risk (paused; not live):
 - Per trade notional ≤ 25% of that ledger's cash
 - Same-event exposure ≤ 40% of that ledger's cash
 - Concurrent open opportunities ≤ 3 on that ledger
@@ -37,21 +62,31 @@ Risk is vs that ledger's own cash/equity:
 - HARD: peak dd ≥ 25% OR equity < **750** → SKIP that ledger only
 - Paper only; no live orders; no hand-edited ledger
 
-Race: first ledger to **2000 USD** wins. Rank by equity / `distance_to_2000`. See [`docs/multi_ledger_race.md`](multi_ledger_race.md).
+`main_arb` still uses REVIEW **10% / <900** and HARD **25% / <750**.
 
-## Stop-follow & rescan
-Stop mirroring a leader immediately if any:
-- peak drawdown ≥ 5%
-- path drawdown ≥ 5%
-- month-to-date PnL ≤ 0
+## Stop-follow & rescan — **DISABLED**
 
-A breach **stops only that copy ledger** (other ledgers keep running) and triggers rescan for replacements: still trading, peak & path DD < 5%, and MTD profitable. poly 负责人 owns rescan cadence; engineering owns hooks.
+~~Stop mirroring a leader immediately if any: peak drawdown ≥ 5% / path
+drawdown ≥ 5% / month-to-date PnL ≤ 0.~~
+
+Stop-follow and rescan hooks are **paused**. No replacement candidates. No
+`STOP_FOLLOW` / `RESCAN_NEEDED` as a live ops path until finance re-opens
+the type.
 
 ## Trading window
-**24h (ops frozen).** No America/New_York 08:00–23:00 session gate. Default is continuous **24h** / **00:00–24:00 ET**. Copy path is **DISABLED**; `arb-main` scans 24h. `booked=0` escalate is calendar continuous 24h.
+
+**24h paper (ops frozen).** No America/New_York 08:00–23:00 session gate.
+Default is continuous **24h** / **00:00–24:00 ET**. `booked=0` escalate is
+calendar continuous 24h.
+
+~~Copy ledgers may scan continuously to mirror 24h leaders.~~ Copy ledgers
+and watchlist are **paused**. `main_arb` is the only racing ledger.
 
 ## Forbidden
+
 - Blind follow / addresses not on watchlist
 - Pure discretionary directional bets outside mirror path
 - Ignoring delay, depth, or fees
 - Live money / ledger mutation
+- **Any copy-follow / watchlist / mirror / copy-ledger activity while this
+  type is DISABLED**
