@@ -1,7 +1,10 @@
 # Whiskas inventory strategy (frozen 2026-09-16) — paper only
 
+> **OWNER HALT:** `whiskas.enabled=false` and `accounts.whiskas-inv.paused=true`.
+> No paper booking. Loop must not trade this ledger. Do not invent a new strategy.
+>
 > **FROZEN** by poly金融 (FINAL). Allow-list name: `whiskas_inventory`.
-> Ledger: **`whiskas-inv`** — **main race ledger**.
+> Ledger: **`whiskas-inv`** — **main race ledger** (currently paused).
 > Paper only. Do **not** send live chain orders.
 >
 > This is an **inventory / pairing** strategy, **not** copy-follow. It is

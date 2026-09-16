@@ -48,7 +48,8 @@ def test_load_default_config():
     assert cfg.copy.leaders[0].strategy_tag == "BTC_5m"
     assert cfg.copy.leaders[2].strategy_tag == "BTC_15m"
     assert cfg.whiskas is not None
-    assert cfg.whiskas.enabled is True
+    assert cfg.whiskas.enabled is False
+    assert "whiskas-inv" in cfg.paused_accounts
     assert cfg.whiskas.account_id == "whiskas-inv"
     assert cfg.whiskas.starting_balance == Decimal("2300")
     assert cfg.whiskas.target_balance is None

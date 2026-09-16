@@ -113,8 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     if report.daily_summary:
         print(report.daily_summary)
     print(
-        "No real CLOB orders were sent. Race is whiskas-inv (start 2300, report "
-        "pnl/equity/caps; no invented target). arb-main booking is paused. "
-        "Fills are paper-only (depth walk + fees); no live orders."
+        "No real CLOB orders were sent. Owner halt: whiskas-inv is paused "
+        "(whiskas.enabled=false / accounts.whiskas-inv.paused=true) — loop must "
+        "not trade. arb-main booking stays paused. No live orders."
     )
     return 0

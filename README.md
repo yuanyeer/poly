@@ -1,6 +1,6 @@
 # poly
 
-Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。当前赛跑只跑 **`whiskas-inv`**（allow-list **`whiskas_inventory`**）：起始 **2300 USD**，单轮上限 **1200 USD**（只用于报告，不会伪造成交去凑数）。**`arb-main` booking paused**（只读扫描仍可）。Copy 账本 / 观察名单 **DISABLED**。
+Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。**OWNER HALT：** `whiskas.enabled=false` 且 `accounts.whiskas-inv.paused=true` — **`whiskas-inv` 不入账，loop 不得交易**。规则仍是 inventory pairing，不要发明新策略。**`arb-main` booking paused**（只读扫描仍可）。Copy 账本 / 观察名单 **DISABLED**。
 
 本仓库**不会**在 paper 模式向 CLOB 发送真实订单。
 

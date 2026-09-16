@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -31,6 +32,17 @@ def _cfg(tmp_path: Path, **overrides):
     )
 
 
+def _live_whiskas_config():
+    """Historical fixture path only — production YAML is owner-halted."""
+    cfg = load_config("config/paper.yaml")
+    assert cfg.whiskas is not None
+    return replace(
+        cfg,
+        whiskas=replace(cfg.whiskas, enabled=True),
+        paused_accounts=tuple(name for name in cfg.paused_accounts if name != WHISKAS_INV_ID),
+    )
+
+
 def _scan(market, cfg, now: datetime, spent: str = "0"):
     return WhiskasInventoryStrategy().scan(
         market, cfg, now=now, round_notional=Decimal(spent)
@@ -44,7 +56,8 @@ def test_yaml_copy_stays_disabled_and_session_is_24h():
     assert cfg.session_enabled is False
     assert "08:00" not in Path("config/paper.yaml").read_text(encoding="utf-8")
     assert cfg.whiskas is not None
-    assert cfg.whiskas.enabled is True
+    assert cfg.whiskas.enabled is False
+    assert "whiskas-inv" in cfg.paused_accounts
 
 
 def test_timing_gate_too_early_and_too_late(tmp_path):
@@ -288,7 +301,108 @@ def test_default_book_pauses_arb_and_opens_whiskas_inv(tmp_path: Path):
     assert book.arb().paused is True
     assert book.whiskas() is not None
     assert book.whiskas().account_id == WHISKAS_INV_ID
+    assert book.whiskas().paused is True
     assert book.whiskas().state().starting_balance == Decimal("2300")
+
+
+def test_owner_halt_blocks_whiskas_booking_on_default_yaml(tmp_path: Path):
+    cfg = load_config("config/paper.yaml")
+    cfg = cfg.__class__(**{**cfg.__dict__, "ledger_path": tmp_path / "arb-main.jsonl"})
+    assert cfg.whiskas is not None
+    assert cfg.whiskas.enabled is False
+    assert WHISKAS_INV_ID in cfg.paused_accounts
+    market = btc_updown_market(
+        [level("0.40", "80")],
+        [level("0.40", "80")],
+        round_open=OPEN,
+        round_end=OPEN + timedelta(seconds=300),
+    )
+
+    class _Market:
+        def list_scan_targets(self):
+            return []
+
+        def snapshot_target(self, target):
+            return market
+
+        def list_whiskas_targets(self):
+            return [
+                ScanTarget(
+                    kind="binary",
+                    event_id=market.condition_id,
+                    question=market.question,
+                    condition_ids=(market.condition_id,),
+                    slug=market.slug,
+                    round_open=market.round_open,
+                    round_end=market.round_end,
+                )
+            ]
+
+        def snapshot(self, condition_id: str):
+            return market if condition_id == market.condition_id else None
+
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=_Market(),  # type: ignore[arg-type]
+        now_fn=lambda: _now(6),
+    )
+    assert runner.whiskas_strategy is None
+    assert runner.book.whiskas() is not None
+    assert runner.book.whiskas().paused is True
+    assert runner.book.arb().paused is True
+    report = runner.run_cycle()
+    assert report.booked == 0
+    assert runner.book.whiskas().state().fills == []
+    assert runner.book.whiskas().state().cash == Decimal("2300")
+    assert runner.book.arb().state().fills == []
+    assert any("SKIP whiskas booking" in line for line in report.messages)
+
+
+def test_paused_account_blocks_booking_even_if_enabled(tmp_path: Path):
+    cfg = _cfg(tmp_path, paused_accounts=(WHISKAS_INV_ID,))
+    market = btc_updown_market(
+        [level("0.40", "80")],
+        [level("0.40", "80")],
+        round_open=OPEN,
+        round_end=OPEN + timedelta(seconds=300),
+    )
+
+    class _Market:
+        def list_scan_targets(self):
+            return []
+
+        def snapshot_target(self, target):
+            return market
+
+        def list_whiskas_targets(self):
+            return [
+                ScanTarget(
+                    kind="binary",
+                    event_id=market.condition_id,
+                    question=market.question,
+                    condition_ids=(market.condition_id,),
+                    slug=market.slug,
+                    round_open=market.round_open,
+                    round_end=market.round_end,
+                )
+            ]
+
+        def snapshot(self, condition_id: str):
+            return market if condition_id == market.condition_id else None
+
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=_Market(),  # type: ignore[arg-type]
+        now_fn=lambda: _now(6),
+    )
+    assert runner.book.whiskas() is not None
+    assert runner.book.whiskas().paused is True
+    report = runner.run_cycle()
+    assert report.booked == 0
+    assert runner.book.whiskas().state().fills == []
+    assert any("SKIP whiskas booking" in line for line in report.messages)
 
 
 def test_fixture_dryrun_rejects_now_not_exactly_open_plus_6s(tmp_path: Path):
@@ -300,7 +414,7 @@ def test_fixture_dryrun_rejects_now_not_exactly_open_plus_6s(tmp_path: Path):
     raw["now"] = "2026-09-16T12:00:30+00:00"
     bad = tmp_path / "late.json"
     bad.write_text(json.dumps(raw), encoding="utf-8")
-    cfg = load_config("config/paper.yaml")
+    cfg = _live_whiskas_config()
     try:
         run_fixture_dryrun(cfg, bad, whiskas_ledger=tmp_path / "w.jsonl", arb_ledger=tmp_path / "a.jsonl")
         raise AssertionError("expected ValueError for now != open+6s")
@@ -308,11 +422,27 @@ def test_fixture_dryrun_rejects_now_not_exactly_open_plus_6s(tmp_path: Path):
         assert "open+6s" in str(exc)
 
 
+def test_default_yaml_fixture_dryrun_refuses_owner_halt(tmp_path: Path):
+    from polybot.runner.fixture_dryrun import run_fixture_dryrun
+
+    cfg = load_config("config/paper.yaml")
+    try:
+        run_fixture_dryrun(
+            cfg,
+            "fixtures/whiskas_btc_5m_round.json",
+            whiskas_ledger=tmp_path / "w.jsonl",
+            arb_ledger=tmp_path / "a.jsonl",
+        )
+        raise AssertionError("expected fixture dry-run to refuse halted whiskas")
+    except ValueError as exc:
+        assert "whiskas.enabled" in str(exc)
+
+
 def test_fixture_dryrun_writes_both_legs_and_redemption(tmp_path: Path):
     from polybot.runner.cli import main
     from polybot.runner.fixture_dryrun import run_fixture_dryrun
 
-    cfg = load_config("config/paper.yaml")
+    cfg = _live_whiskas_config()
     whiskas_path = tmp_path / "whiskas-inv.jsonl"
     arb_path = tmp_path / "arb-main.jsonl"
     result = run_fixture_dryrun(
@@ -360,11 +490,8 @@ def test_fixture_dryrun_writes_both_legs_and_redemption(tmp_path: Path):
             str(tmp_path / "cli-arb.jsonl"),
         ]
     )
-    assert rc == 0
-    assert (tmp_path / "cli-whiskas.jsonl").read_text(encoding="utf-8").count('"type":"fill"') == 1
-    assert '"type":"redeem"' in (tmp_path / "cli-whiskas.jsonl").read_text(encoding="utf-8")
-    arb_text = (tmp_path / "cli-arb.jsonl").read_text(encoding="utf-8")
-    assert '"type":"fill"' not in arb_text
+    assert rc == 1
+    assert not (tmp_path / "cli-whiskas.jsonl").exists()
 
 
 def test_discovery_filters_btc_5m_updown():

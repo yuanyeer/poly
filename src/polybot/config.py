@@ -146,6 +146,8 @@ class PaperConfig:
     copy: CopyConfig | None = None
     whiskas: WhiskasConfig | None = None
     race_primary_account: str = "arb-main"
+    # accounts.<id>.paused: true — runner must not book that ledger.
+    paused_accounts: tuple[str, ...] = ()
 
 
 def _d(value: Any) -> Decimal:
@@ -444,6 +446,36 @@ def whiskas_runtime_enabled(whiskas: WhiskasConfig | None) -> bool:
     return whiskas is not None and whiskas.enabled
 
 
+def parse_paused_accounts(raw: dict[str, Any]) -> tuple[str, ...]:
+    section = raw.get("accounts")
+    if not section:
+        return ()
+    if not isinstance(section, dict):
+        raise ConfigError("accounts must be a mapping")
+    paused: list[str] = []
+    for account_id, body in section.items():
+        name = str(account_id).strip()
+        if not name:
+            raise ConfigError("accounts keys must be non-empty account ids")
+        if body is None:
+            continue
+        if not isinstance(body, dict):
+            raise ConfigError(f"accounts.{name} must be a mapping")
+        if bool(body.get("paused", False)):
+            paused.append(name)
+    return tuple(paused)
+
+
+def account_booking_paused(config: PaperConfig, account_id: str) -> bool:
+    """True when YAML accounts.<id>.paused or whiskas.enabled=false blocks booking."""
+    if account_id in config.paused_accounts:
+        return True
+    whiskas = config.whiskas
+    if whiskas is not None and account_id == whiskas.account_id and not whiskas.enabled:
+        return True
+    return False
+
+
 def load_config(path: str | Path | None = None) -> PaperConfig:
     load_dotenv(override=False)
     config_path = Path(path or os.environ.get("POLY_CONFIG") or "config/paper.yaml")
@@ -514,6 +546,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         copy=_load_copy(raw, config_path),
         whiskas=whiskas,
         race_primary_account=race_primary,
+        paused_accounts=parse_paused_accounts(raw),
     )
     _enforce_floors(cfg)
     if cfg.poll_interval_seconds < 5:
