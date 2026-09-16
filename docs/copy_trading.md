@@ -4,20 +4,24 @@
 >
 > Copy-trading is **entirely off**: watchlist, copy ledgers, mirror executor,
 > and stop-follow / rescan are **paused** until **poly金融** re-opens the type.
-> Playbook is being distilled separately. Do not treat observation hooks as
+> Distilled inventory rules live in `docs/whiskas_inventory_rules.md` —
+> that is **not** a copy-follow re-open. Do not treat observation hooks as
 > an allowed strategy.
 >
-> **Current allow list:** lock arb (YES+NO / complete-set) + maker spread only.
-> **Race:** **`whiskas-inv`** (start **2300**, no invented target).
-> **`arb-main` booking is paused.** 24h paper. Whiskas REVIEW **10% / <2070**,
-> HARD **25% / <1725**. Lock-arb floors unchanged. Not a copy-follow re-open.
+> **Current allow list:** lock arb (YES+NO / complete-set) + maker spread +
+> **`whiskas_inventory`** (paper, ledger **`whiskas-inv`**). This file is
+> **not** that type.
+> **Race:** **`whiskas-inv`**, start **2300**, per-round cap **1200**.
+> REVIEW **10% / equity < 2070**. HARD **25% / equity < 1725**.
+> **`arb-main` booking paused** (read-only scan OK). Lock-arb floors unchanged.
 >
 > This file is kept for history. Do not delete it. Struck entries below are
 > **not** live.
 
 ~~poly金融 allowed a new strategy type: **copy-trading（观察 → 小仓纸面）**.~~
 **Removed from the allow list.** Existing YES+NO / complete-set / maker-spread
-arb is unchanged and is the **only** allowed set. Edge floors, fee formulas,
+arb is unchanged. **`whiskas_inventory`** is a separate frozen paper type,
+not a copy-follow re-open. Edge floors, fee formulas,
 and the 25% / 40% / ≤3 concurrent gates are **not** loosened.
 
 This repo still ships historical observation stubs. They are **not** an
@@ -44,19 +48,20 @@ calendar continuous 24h.
 
 ~~Copy observation / future mirror hooks may scan continuously.~~ Copy
 observation, watchlist, and copy ledgers are **paused**. Race continues on
-**`main_arb` only**.
+**`whiskas-inv`**. **`arb-main` booking paused** (read-only scan OK).
 
 ## Limits
 
 - **No live copy ledgers.** ~~Each watchlist leader has one independent
   paper ledger starting at 1000 USD.~~ Those ledgers are **paused** until
   finance re-opens the type. There is **no** global copy-sleeve 30%.
-- **Race:** single **`main_arb`** ledger, start **1000**, first to **2000**
-  wins (`distance_to_2000`). See `docs/multi_ledger_race.md`.
-- Existing caps still apply on **`main_arb`**: single trade ≤ 25% of cash,
-  same event ≤ 40% of cash, ≤ 3 concurrent opens
-- REVIEW: peak dd ≥ 10% OR equity < **900** → escalate, keep scanning `main_arb`
-- HARD: peak dd ≥ 25% OR equity < **750** → SKIP `main_arb`
+- **Race:** **`whiskas-inv`**, start **2300**, per-round cap **1200**. See
+  `docs/multi_ledger_race.md` and `docs/whiskas_inventory_rules.md`.
+  **`arb-main` booking paused** (read-only scan OK).
+- Existing lock-arb caps (25% / 40% / ≤3) apply only if `arb-main` booking
+  is later re-opened
+- REVIEW: peak dd ≥ 10% OR equity < **2070** → escalate, keep scanning `whiskas-inv`
+- HARD: peak dd ≥ 25% OR equity < **1725** → SKIP `whiskas-inv`
 - Arb edge floors stay at 0.5¢ taker / 0.2¢ maker
 - ~~Mirror chase: abandon if `|fill_px − leader_px| + fee/share` > 0.01 (1¢)~~
   — **DISABLED**
