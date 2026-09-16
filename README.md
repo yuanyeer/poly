@@ -57,7 +57,7 @@ poly-paper --once
 python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.jsonl
 ```
 
-持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，以及余额、PnL、win rate、未平仓敞口：
+持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：fills、cash、equity、pnl、win_rate、open exposure）：
 
 ```bash
 poly-paper --loop

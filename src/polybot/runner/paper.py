@@ -3,14 +3,13 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from polybot.config import PaperConfig
 from polybot.ledger.store import PaperLedger
 from polybot.market.client import LiveOrderForbidden, PaperMarketClient
 from polybot.risk.gates import RiskEngine
-from polybot.runner.summary import SessionStats, daily_fills, format_summary
+from polybot.runner.summary import SessionStats, build_daily_snapshot, format_daily, format_summary
 from polybot.strategy import default_strategies
 from polybot.strategy.sizer import resize_to_book
 from polybot.types import LedgerState, MarketSnapshot, Opportunity, ScanTarget
@@ -82,6 +81,7 @@ class PaperRunner:
                     state=state,
                     messages=["interrupted before first cycle"],
                     summary=format_summary("SUMMARY", self.config, state, self.stats),
+                    daily_summary=format_daily(build_daily_snapshot(state), self.config),
                 )
             return last
 
@@ -146,32 +146,18 @@ class PaperRunner:
         state = self.ledger.state()
         messages.append(self.status_line(state))
         summary = format_summary("SUMMARY", self.config, state, self.stats)
-        daily = ""
-        day_key = datetime.now(timezone.utc).date().isoformat()
+        daily_snap = build_daily_snapshot(state)
+        daily = format_daily(daily_snap, self.config)
+        day_key = daily_snap.date
         if self._day_key is None:
             self._day_key = day_key
         elif day_key != self._day_key:
-            daily_stats = SessionStats(
-                cycles=self.stats.cycles,
-                scanned=self.stats.scanned,
-                candidates=self.stats.candidates,
-                booked=self.stats.booked,
-                rejected_edges=self.stats.rejected_edges,
-                rejected_risk=self.stats.rejected_risk,
-            )
-            daily = format_summary(
-                f"DAILY {self._day_key}",
-                self.config,
-                state,
-                daily_stats,
-                fills=daily_fills(state),
-            )
+            logger.info("DAILY close %s — rolling to %s", self._day_key, day_key)
             self._day_key = day_key
         if self.stats.cycles % self.config.summary_every_cycles == 0:
             messages.append(summary)
-            logger.info(summary)
-        if daily:
             messages.append(daily)
+            logger.info(summary)
             logger.info(daily)
         return CycleReport(
             scanned=scanned,
