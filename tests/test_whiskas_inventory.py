@@ -291,6 +291,63 @@ def test_default_book_pauses_arb_and_opens_whiskas_inv(tmp_path: Path):
     assert book.whiskas().state().starting_balance == Decimal("2300")
 
 
+def test_fixture_dryrun_writes_both_legs_and_redemption(tmp_path: Path):
+    from polybot.runner.cli import main
+    from polybot.runner.fixture_dryrun import run_fixture_dryrun
+
+    cfg = load_config("config/paper.yaml")
+    whiskas_path = tmp_path / "whiskas-inv.jsonl"
+    arb_path = tmp_path / "arb-main.jsonl"
+    result = run_fixture_dryrun(
+        cfg,
+        "fixtures/whiskas_btc_5m_round.json",
+        whiskas_ledger=whiskas_path,
+        arb_ledger=arb_path,
+    )
+    assert result.booked == 1
+    assert result.redeemed == 1
+    assert result.book_report.summary
+    assert "booked=1" in result.book_report.summary or result.book_report.booked == 1
+    fills = [fill for fill in result.whiskas_state.fills if "redeem" not in fill.notes]
+    assert len(fills) == 1
+    fill = fills[0]
+    assert fill.strategy == "whiskas_inventory"
+    assert {leg.outcome for leg in fill.legs} == {"Up", "Down"}
+    assert all(leg.side == "BUY" for leg in fill.legs)
+    assert all(leg.size == Decimal("50") for leg in fill.legs)
+    assert all(leg.price <= Decimal("0.89") for leg in fill.legs)
+    assert all(leg.levels_used >= 2 for leg in fill.legs)
+    assert sum(leg.price for leg in fill.legs) <= Decimal("1.05")
+    ts = datetime.fromisoformat(fill.ts)
+    opened = datetime.fromisoformat("2026-09-16T12:00:00+00:00")
+    ended = datetime.fromisoformat("2026-09-16T12:05:00+00:00")
+    assert (ts - opened).total_seconds() >= 6
+    assert (ended - ts).total_seconds() > 100
+    redeem = [fill for fill in result.whiskas_state.fills if "redeem" in fill.notes][0]
+    assert redeem.cash_credit == Decimal("50")
+    assert redeem.legs == ()
+    assert result.arb_state.fills == []
+    assert result.arb_state.cash == Decimal("1000")
+    pnl = result.whiskas_state.equity - result.whiskas_state.starting_balance
+    assert result.whiskas_state.cash != result.whiskas_state.starting_balance
+    assert pnl != Decimal("0")
+    rc = main(
+        [
+            "--fixture",
+            "fixtures/whiskas_btc_5m_round.json",
+            "--whiskas-ledger",
+            str(tmp_path / "cli-whiskas.jsonl"),
+            "--ledger",
+            str(tmp_path / "cli-arb.jsonl"),
+        ]
+    )
+    assert rc == 0
+    assert (tmp_path / "cli-whiskas.jsonl").read_text(encoding="utf-8").count('"type":"fill"') == 1
+    assert '"type":"redeem"' in (tmp_path / "cli-whiskas.jsonl").read_text(encoding="utf-8")
+    arb_text = (tmp_path / "cli-arb.jsonl").read_text(encoding="utf-8")
+    assert '"type":"fill"' not in arb_text
+
+
 def test_discovery_filters_btc_5m_updown():
     cfg = whiskas_cfg()
     assert is_btc_5m_updown("Bitcoin Up or Down - 8:00AM-8:05AM ET", cfg)
