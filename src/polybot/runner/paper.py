@@ -48,8 +48,10 @@ class SessionWatch:
 
     Overnight idle (session end → next start) must not increment zero_book_cycles
     or zero_fill_sessions. Drawdown is live ledger equity vs peak every cycle.
-    Escalate (ops questions poly金融): peak DD ≥ 10% OR balance < 180.
-    Hard halt protection only: peak DD ≥ 25% — does not replace the escalate line.
+    Escalate / REVIEW (ask poly金融): peak DD ≥ 10% OR equity < 180 —
+    continue scanning; do NOT hard-stop.
+    Hard halt / SKIP: peak DD ≥ 25% OR equity < 150. 150 is intentionally
+    below 180 so the floors do not collide.
     """
 
     peak_equity: Decimal = Decimal("0")

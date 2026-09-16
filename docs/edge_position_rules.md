@@ -105,10 +105,10 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 2. **连续 24h booked=0 (escalate)** — Escalate / strategy-review when `booked=0` accumulates to ~24h. The meter is still **cumulative time inside this trading window only** (**America/New_York 09:00–22:00**). Off-hours (scanner stopped / outside NY 09:00–22:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
 
-3. **Drawdown — two tiers (do not collapse)** — Live, real time: compare current paper ledger balance vs peak. This watch does **not** pause outside the trading window.
+3. **Drawdown — two tiers (do not collapse)** — Live, real time: compare current paper ledger equity vs peak. This watch does **not** pause outside the trading window.
 
-   - **Escalate / strategy-review** (ops questions **poly金融**): peak drawdown **≥ 10%** **OR** balance **< 180 USD**. This is the first review gate, not the hard stop.
-   - **Hard halt protection only**: peak drawdown **≥ 25%** — stops trading. This **does not replace** the 10% / 180 escalate line. Crossing 25% does not retire the duty to escalate at 10% or 180.
+   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown **≥ 10%** **OR** equity **< 180**. **Continue scanning; do NOT hard-stop.** This is the review gate only.
+   - **Hard halt / SKIP**: peak drawdown **≥ 25%** **OR** equity **< 150**. Stops trading. **150 is intentionally below 180** so the review floor and the halt floor do not collide. The 25% / 150 halt does **not** replace the 10% / 180 REVIEW line.
 
 ## Trading session (implemented)
 
@@ -118,8 +118,8 @@ Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DS
 - **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
 - Continuous `booked=0` **escalate** still uses **cumulative trading-window time** only (**America/New_York 09:00–22:00**), **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
 - Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). Two tiers — do not collapse:
-  - **Escalate / strategy-review** (ops questions **poly金融**): peak drawdown ≥ **10%** OR equity < **180 USD**. The 25% halt does **not** replace this line.
-  - **Hard halt protection only**: peak drawdown ≥ `drawdown_halt_pct` (default **25%**) stops scanning (`SKIP drawdown_halt`) even while the session is open.
+  - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **180**. **Continue scanning; do NOT hard-stop.**
+  - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **150**. Stops scanning (`SKIP drawdown_halt`) even while the session is open. **150 is intentionally below 180** so the floors do not collide.
 
 ## Daily scan quality
 
