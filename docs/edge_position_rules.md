@@ -5,11 +5,12 @@ Aligned with poly金融 allow/deny list. 加密算法师: hang these as validato
 This file is the frozen source of truth for paper-mode edge, fee, depth-walk, and position gates. Thresholds and formulas below must not be loosened.
 
 > **Allow list (finance freeze 2026-09-16):** lock arb (YES+NO / complete-set)
-> + maker spread **only**. Copy-follow is **ENTIRELY DISABLED** (watchlist,
-> copy ledgers, mirror, stop-follow / rescan) until poly金融 re-opens the type.
-> Race is the single **`main_arb`** ledger: start **1000** → target **2000**,
-> 24h paper, REVIEW **10% / <900**, HARD **25% / <750**. Lock-arb floors below
-> are unchanged.
+> + maker spread + **`whiskas_inventory`**. Copy-follow is **ENTIRELY DISABLED**
+> (watchlist, copy ledgers, mirror, stop-follow / rescan) until poly金融
+> re-opens the type. Race is **`whiskas-inv`** (start **2300**, per-round cap
+> **1200**, no invented target). **`arb-main` booking is paused**. 24h paper.
+> Whiskas REVIEW **10% / <2070**, HARD **25% / <1725**. Lock-arb floors below
+> are unchanged. See [`whiskas_inventory_rules.md`](whiskas_inventory_rules.md).
 
 ## Constants
 

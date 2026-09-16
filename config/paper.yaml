@@ -72,3 +72,36 @@ session:
 copy:
   enabled: false
   path: config/copy.yaml
+
+# Finance race: whiskas-inv (start 2300). No invented target — report pnl /
+# equity / per-round cap. Keep distance-to-target style when a target is set.
+# This is inventory / pairing, NOT copy-follow. copy.enabled stays false.
+race:
+  primary_account: whiskas-inv
+
+whiskas:
+  enabled: true
+  account_id: whiskas-inv
+  ledger_path: data/whiskas-inv.jsonl
+  starting_balance_usd: 2300
+  # target_balance_usd: omit — do not invent a race target
+  per_round_notional_cap_usd: 1200
+  clip_size: 50
+  enter_after_open_seconds: 6
+  stop_remaining_seconds: 100
+  max_buy_price: 0.89
+  combo_sum_cap: 1.05
+  round_seconds: 300
+  pause_arb_main_booking: true
+  drawdown_review_pct: 0.10
+  drawdown_review_floor_usd: 2070
+  drawdown_halt_pct: 0.25
+  drawdown_halt_floor_usd: 1725
+  market:
+    asset: BTC
+    interval: 5m
+    question_needles: ["bitcoin", "btc"]
+    updown_needles: ["up or down", "up/down", "updown"]
+    interval_needles: ["5m", "5-min", "5 min", "5-minute", "5 minute"]
+    outcome_up: ["up", "yes"]
+    outcome_down: ["down", "no"]
