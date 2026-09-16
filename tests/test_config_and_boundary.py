@@ -42,6 +42,15 @@ def test_rejects_lowered_edge_floor(tmp_path: Path):
         load_config(path)
 
 
+def test_rejects_too_fast_polling(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["scan"]["poll_interval_seconds"] = 1
+    path = tmp_path / "fast.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ConfigError, match="poll_interval_seconds"):
+        load_config(path)
+
+
 def test_rejects_non_paper_mode(tmp_path: Path):
     raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
     raw["mode"] = "live"

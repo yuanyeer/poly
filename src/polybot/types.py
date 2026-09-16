@@ -40,6 +40,8 @@ class OutcomeBook:
     asks: tuple[BookLevel, ...]
     tick_size: Decimal
     min_order_size: Decimal
+    fee: FeeSchedule | None = None
+    condition_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,17 @@ class MarketSnapshot:
     fee: FeeSchedule
     outcomes: tuple[OutcomeBook, ...]
     min_order_size: Decimal
+    kind: str = "binary"
+
+
+@dataclass(frozen=True)
+class ScanTarget:
+    """A binary condition or a multi-market complete-set bundle."""
+
+    kind: Literal["binary", "complete_set"]
+    event_id: str
+    question: str
+    condition_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)

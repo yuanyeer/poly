@@ -53,6 +53,12 @@ def main(argv: list[str] | None = None) -> int:
         once = not args.loop and args.max_loops is None
         if args.once:
             once = True
+        if args.loop and not args.once:
+            print(
+                f"paper loop on {config.clob_host} every {config.poll_interval_seconds:.0f}s "
+                f"(Ctrl+C to stop). No live orders.",
+                flush=True,
+            )
         report = runner.run_forever(max_loops=args.max_loops, once=once)
     except LiveOrderForbidden as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -66,8 +72,13 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
     print(
         f"scanned={report.scanned} candidates={report.candidates} "
-        f"booked={report.booked} skipped={report.skipped}"
+        f"booked={report.booked} skipped={report.skipped} "
+        f"rejected_edge={report.rejected_edges} rejected_risk={report.rejected_risk}"
     )
+    if report.summary:
+        print(report.summary)
+    if report.daily_summary:
+        print(report.daily_summary)
     print(
         "No real CLOB orders were sent. Target 1000 USD is a report-only milestone; "
         "fills are written only when live depth + fees clear the edge floors."

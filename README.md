@@ -57,13 +57,15 @@ poly-paper --once
 python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.jsonl
 ```
 
-持续轮询（仍然只写本地账本，不会下真单）：
+持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，以及余额、PnL、win rate、未平仓敞口：
 
 ```bash
 poly-paper --loop
 ```
 
-配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。
+发现面会同时拉 CLOB `sampling-markets` + `markets`（可翻页）和 Gamma 活跃市场 / 多结果事件。YES+NO 与 complete-set 会在多个数量上 walk 盘口（不只看最深一档），门槛与风控不变。
+
+配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。
 
 账本是 `data/paper_ledger.jsonl`：只追加、带哈希链。没有 `set_balance`。余额 = 200 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
 

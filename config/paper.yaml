@@ -14,8 +14,13 @@ endpoints:
   chain_id: 137
 
 scan:
-  max_markets: 12
-  poll_interval_seconds: 15
+  max_markets: 36
+  poll_interval_seconds: 20
+  clob_pages: 2
+  include_gamma: true
+  max_complete_set_events: 10
+  size_probe_steps: 8
+  summary_every_cycles: 1
   # Optional explicit condition IDs. Empty = discover via CLOB/Gamma.
   condition_ids: []
 

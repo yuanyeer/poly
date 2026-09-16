@@ -94,3 +94,38 @@ class MakerSpreadStrategy(Strategy):
             if best is None or candidate.edge > best.edge:
                 best = candidate
         return [best] if best is not None else []
+
+    def preview_edge(self, market: MarketSnapshot, config: PaperConfig):
+        if len(market.outcomes) < 2:
+            return None
+        best_edge = None
+        for idx, posted in enumerate(market.outcomes):
+            quote = best_bid(posted)
+            if quote is None:
+                continue
+            others = [outcome for j, outcome in enumerate(market.outcomes) if j != idx]
+            size = min(quote.size, depth_cap(MarketSnapshot(
+                condition_id=market.condition_id,
+                question=market.question,
+                fee=market.fee,
+                outcomes=tuple(others),
+                min_order_size=market.min_order_size,
+            )))
+            min_size = max(config.min_fill_size, market.min_order_size)
+            if size < min_size:
+                continue
+            hedge_walks = [walk_asks(other, size) for other in others]
+            if any(not walk.fillable for walk in hedge_walks):
+                continue
+            maker_fee = fee_amount(size, quote.price, market.fee, "maker")
+            hedge_fees = [fee_amount(size, walk.vwap, market.fee, "taker") for walk in hedge_walks]
+            edge = (
+                Decimal("1")
+                - quote.price
+                - sum((walk.vwap for walk in hedge_walks), Decimal("0"))
+                - (maker_fee / size)
+                - sum((fee / size for fee in hedge_fees), Decimal("0"))
+            )
+            if best_edge is None or edge > best_edge:
+                best_edge = edge
+        return best_edge

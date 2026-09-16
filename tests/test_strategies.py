@@ -23,6 +23,18 @@ def test_yes_no_lock_detects_clear_taker_edge(cfg):
     assert opps[0].expected_payout == opps[0].size
 
 
+def test_yes_no_lock_uses_shallow_size_when_deep_book_kills_edge(cfg):
+    # Top 5 shares lock; the rest of the book is untradeable for a complete set.
+    market = binary_market(
+        yes_asks=[level("0.40", "5"), level("0.90", "200")],
+        no_asks=[level("0.40", "5"), level("0.90", "200")],
+    )
+    opps = YesNoLockStrategy().scan(market, cfg)
+    assert len(opps) == 1
+    assert opps[0].size < Decimal("10")
+    assert opps[0].edge >= Decimal("0.005")
+
+
 def test_yes_no_lock_skips_when_sum_near_one(cfg):
     market = binary_market(
         yes_asks=[level("0.51", "20")],
