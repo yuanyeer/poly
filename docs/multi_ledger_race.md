@@ -1,42 +1,52 @@
-# Multi-ledger race rules (freeze 2026-09-16) — **single `main_arb`**
+# Multi-ledger race rules (freeze 2026-09-16) — **`whiskas-inv`**
 
-> **Copy ledgers DISABLED (finance freeze 2026-09-16).**
+> **Finance freeze FINAL (2026-09-16).**
 >
-> Race continues on the **`main_arb`** (`arb-main`) ledger **only**. Copy
-> ledgers (`copy-<leader>` / `copy:<leader>`) and the watchlist are **paused**
-> until **poly金融** re-opens the type. Runtime gate (#12): `copy.enabled: false`
-> skips watchlist, copy ledgers, and `MirrorExecutor`. Do not delete historical
-> ids below; they are struck, not live.
+> Race is the **`whiskas-inv`** ledger (**allow-list `whiskas_inventory`**).
+> Start **2300 USD**. Per-round cap **1200 USD**. Paper only.
+>
+> **`arb-main` / `main_arb`:** booking **paused** (read-only scan OK).
+> Copy ledgers (`copy-<leader>` / `copy:<leader>`) and the watchlist remain
+> **DISABLED**. Runtime gate (#12): `copy.enabled: false` skips watchlist,
+> copy ledgers, and `MirrorExecutor`. Do not delete historical ids below;
+> they are struck, not live.
+>
+> Inventory rules: [`whiskas_inventory_rules.md`](whiskas_inventory_rules.md).
 
 ## Goal
-The racing paper ledger starts at **1000 USD**. First to **2000 USD** wins.
-Rank by equity / distance-to-2000.
+The racing paper ledger is **`whiskas-inv`**, start **2300 USD**.
+Rank by that ledger's equity / PnL. Do **not** fabricate fills.
+
+`distance_to_2000` was the old **`main_arb`** 1000 → 2000 report field.
+It is **not** the `whiskas-inv` race target.
 
 ## Ledgers
-Implemented / historical ids: **arb-main** (docs freeze also called
-`main_arb`) and ~~**copy-\<leader\>**~~ (docs freeze also called
-~~`copy:<leader>`~~, e.g. ~~`copy-x-MoneyForWhiskas`~~).
 
-1. **arb-main / `main_arb`** — **LIVE.** YES+NO / complete-set / maker only
-2. ~~**copy-\<leader\>** — one ledger per watchlist leader~~ — **DISABLED /
-   paused** until finance re-opens the type
+1. **`whiskas-inv`** — **LIVE / main race.** `whiskas_inventory` paper pairing
+2. **arb-main / `main_arb`** — **booking paused** (read-only scan OK). Lock-arb
+   / maker floors unchanged but do **not** book
+3. ~~**copy-\<leader\>** — one ledger per watchlist leader~~ — **DISABLED /
+   paused**
 
 Watchlist (paused): ~~`x-MoneyForWhiskas`~~, ~~`0xcd30457c79`~~,
-~~`goldfisherrr`~~. No follow. No copy-ledger race.
+~~`goldfisherrr`~~. No follow. No copy-ledger race. No copy mirror.
 
 No cross-ledger cash, positions, exposure, or PnL sharing.
 
 ## Per-ledger risk (own equity only)
-Applies to the live **`main_arb`** ledger:
 
-- Trade ≤ 25% of that ledger's cash
-- Same-event ≤ 40% of that ledger's cash
-- Concurrent opens ≤ 3 on that ledger
-- ~~Copy chase ≤ 1¢ on copy ledgers (no global 30% sleeve)~~ — **DISABLED**
-- REVIEW: dd ≥ 10% or equity < **900** → escalate, keep scanning `main_arb`
-- HARD: dd ≥ 25% or equity < **750** → SKIP `main_arb`
-- ~~Copy stop-follow: leader peak/path DD ≥ 5% or month_pnl ≤ 0 → stop that
-  copy ledger + rescan~~ — **DISABLED**
+Applies to the live **`whiskas-inv`** race ledger:
+
+- Per-round notional cap **$1200**
+- Clip **50 shares**; buy **≤89¢**; combo Up+Down ask sum **≤105¢**
+- REVIEW: dd ≥ **10%** OR equity < **2070** → escalate, keep scanning `whiskas-inv`
+- HARD: dd ≥ **25%** OR equity < **1725** → SKIP `whiskas-inv`
+- ~~Copy chase ≤ 1¢ on copy ledgers~~ — **DISABLED**
+- ~~Copy stop-follow + rescan~~ — **DISABLED**
+
+`arb-main` has no live booking; its historical 25% / 40% / ≤3 and
+REVIEW **10% / <900** / HARD **25% / <750** gates are **not** the race
+gates while booking is paused.
 
 ## Session (ops frozen)
 **24h paper.** There is **no America/New_York 08:00–23:00 (or 09:00–22:00)
@@ -47,16 +57,13 @@ The previous ET window is superseded.
   excluded, because there are no off-hours.
 - ~~Copy ledgers may scan continuously so they can mirror 24h leaders.~~
   Copy ledgers and watchlist are **paused**.
-- ~~Priority reason: primary leader `x-MoneyForWhiskas` is full-day / 24h.~~
+- `arb-main` may keep a read-only scan; it must **not** book.
 
 Lock-arb edge floors (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢) are
-unchanged.
+unchanged and unused for booking while `arb-main` is paused.
 
 ## Reporting
 `SUMMARY` / `DAILY` must split by account / ledger_id: cash, equity, PnL,
-`distance_to_2000`, `screened_n`, `below_floor_n`, `median_net_edge`,
-`median_net_edge_kind=raw|walked`, `best_binary` / `best_set`, review/halt
-flags, plus `RANK` / `WINNER` (report only; no fabricated fills).
-
-While copy is DISABLED, the only racing account is **`main_arb`**. Historical
-`copy-*` files may exist on disk; they are **not** in the race.
+review/halt flags, plus `RANK` / `WINNER` (report only; no fabricated fills).
+Race rank is **`whiskas-inv`**. Historical `copy-*` files and `arb-main`
+fills may exist on disk; they are **not** the live race book.
