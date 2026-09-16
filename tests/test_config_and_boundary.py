@@ -47,6 +47,21 @@ def test_load_default_config():
     assert cfg.copy.leaders[0].primary is True
     assert cfg.copy.leaders[0].strategy_tag == "BTC_5m"
     assert cfg.copy.leaders[2].strategy_tag == "BTC_15m"
+    assert cfg.whiskas is not None
+    assert cfg.whiskas.enabled is True
+    assert cfg.whiskas.account_id == "whiskas-inv"
+    assert cfg.whiskas.starting_balance == Decimal("2300")
+    assert cfg.whiskas.target_balance is None
+    assert cfg.whiskas.clip_size == Decimal("50")
+    assert cfg.whiskas.enter_after_open_seconds == 6
+    assert cfg.whiskas.stop_remaining_seconds == 100
+    assert cfg.whiskas.max_buy_price == Decimal("0.89")
+    assert cfg.whiskas.combo_sum_cap == Decimal("1.05")
+    assert cfg.whiskas.per_round_notional_cap == Decimal("1200")
+    assert cfg.whiskas.pause_arb_main_booking is True
+    assert cfg.whiskas.drawdown_review_floor_usd == Decimal("2070")
+    assert cfg.whiskas.drawdown_halt_floor_usd == Decimal("1725")
+    assert cfg.race_primary_account == "whiskas-inv"
 
 
 def test_rejects_loosened_position_cap(tmp_path: Path):

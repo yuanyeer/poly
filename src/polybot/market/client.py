@@ -8,6 +8,7 @@ import httpx
 from py_clob_client_v2 import ClobClient
 
 from polybot.config import PaperConfig
+from polybot.config import whiskas_runtime_enabled
 from polybot.market.discover import (
     binary_targets,
     build_screen_tape,
@@ -18,6 +19,7 @@ from polybot.market.discover import (
     parse_ask_map,
     rank_targets_by_raw_edge,
 )
+from polybot.market.whiskas import collect_whiskas_targets, parse_round_clock, row_resolution
 from polybot.types import BookLevel, FeeSchedule, MarketSnapshot, OutcomeBook, ScanTarget, ScreenTape
 
 logger = logging.getLogger(__name__)
@@ -153,6 +155,21 @@ class PaperMarketClient:
         )
         return list(tape.walk_targets)
 
+    def list_whiskas_targets(self) -> list[ScanTarget]:
+        if not whiskas_runtime_enabled(self.config.whiskas) or self.config.whiskas is None:
+            return []
+        rows: list[dict[str, Any]] = []
+        rows.extend(self._from_clob_rows("get_sampling_markets"))
+        rows.extend(self._from_clob_rows("get_markets"))
+        gamma_rows = self._gamma_binary_rows()
+        if isinstance(gamma_rows, list):
+            rows.extend(item for item in gamma_rows if isinstance(item, dict))
+        elif isinstance(gamma_rows, dict):
+            data = gamma_rows.get("data") or gamma_rows.get("markets") or []
+            if isinstance(data, list):
+                rows.extend(item for item in data if isinstance(item, dict))
+        return collect_whiskas_targets(rows, self.config.whiskas)
+
     def _live_binaries(self) -> list[ScanTarget]:
         rows = self._from_clob_rows("get_sampling_markets")
         found: dict[str, ScanTarget] = {}
@@ -259,6 +276,11 @@ class PaperMarketClient:
             outcomes=snap.outcomes,
             min_order_size=snap.min_order_size,
             kind="binary",
+            slug=target.slug or snap.slug,
+            round_open=target.round_open or snap.round_open,
+            round_end=target.round_end or snap.round_end,
+            resolved=target.resolved or snap.resolved,
+            winner=target.winner or snap.winner,
         )
 
     def snapshot(self, condition_id: str) -> MarketSnapshot | None:
@@ -277,6 +299,10 @@ class PaperMarketClient:
         outcomes = self._books_for_tokens(tokens, fee, min_order, tick, condition_id)
         if len(outcomes) < 2:
             return None
+        start, end = parse_round_clock(info, round_seconds=300)
+        if self.config.whiskas is not None:
+            start, end = parse_round_clock(info, round_seconds=self.config.whiskas.round_seconds)
+        resolved, winner = row_resolution(info)
         return MarketSnapshot(
             condition_id=condition_id,
             question=question,
@@ -284,6 +310,11 @@ class PaperMarketClient:
             outcomes=tuple(outcomes),
             min_order_size=min_order,
             kind="binary",
+            slug=str(info.get("slug") or ""),
+            round_open=start,
+            round_end=end,
+            resolved=resolved,
+            winner=winner,
         )
 
     def _snapshot_complete_set(self, target: ScanTarget) -> MarketSnapshot | None:

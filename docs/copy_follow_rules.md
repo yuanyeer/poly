@@ -8,9 +8,11 @@
 > allowed strategy type until **poly金融** re-opens it.
 >
 > **Current allow list:** lock arb (YES+NO / complete-set) + maker spread only.
-> **Race:** single **`main_arb`** (`arb-main`) ledger, start **1000** → target
-> **2000**. 24h paper. REVIEW **10% / equity < 900**. HARD **25% / equity < 750**.
-> Lock-arb floors unchanged (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢).
+> **Race:** **`whiskas-inv`** inventory ledger (start **2300**; no invented
+> target). **`arb-main` booking is paused.** Historical lock-arb lines below
+> (1000 → 2000, REVIEW 900 / HARD 750) apply only if arb booking is re-opened.
+> 24h paper. Lock-arb floors unchanged (`MIN_EDGE_TAKER` 0.5¢ / `MIN_EDGE_MAKER` 0.2¢).
+> Whiskas rules: [`whiskas_inventory_rules.md`](whiskas_inventory_rules.md).
 >
 > This file is kept for history. Do not delete it. Struck entries below are
 > **not** live.
@@ -80,7 +82,7 @@ Default is continuous **24h** / **00:00–24:00 ET**. `booked=0` escalate is
 calendar continuous 24h.
 
 ~~Copy ledgers may scan continuously to mirror 24h leaders.~~ Copy ledgers
-and watchlist are **paused**. `main_arb` is the only racing ledger.
+and watchlist are **paused**. Race is **`whiskas-inv`**; `arb-main` booking is paused.
 
 ## Forbidden
 

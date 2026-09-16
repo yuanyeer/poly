@@ -1,6 +1,6 @@
 # poly
 
-Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。当前赛跑只跑 **`main_arb`**：起始 **1000 USD**，先到 **2000 USD** 获胜（只用于报告，不会伪造成交去凑数）。Copy 账本 / 观察名单 **DISABLED**，直到 poly金融重新开放该类型。
+Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续费和滑点决定是否成交，并把成交记入本地账本。当前赛跑只跑 **`whiskas-inv`**：起始 **2300 USD**，按 pnl / equity / 每轮 **1200** 上限报告（未另设目标，不伪造成交）。**`arb-main` 记账暂停**（只读 SCREEN 可继续）。Copy 账本 / 观察名单 **DISABLED**，直到 poly金融重新开放该类型。
 
 本仓库**不会**在 paper 模式向 CLOB 发送真实订单。
 
@@ -20,18 +20,19 @@ Polymarket CLOB **paper-trading** 套利骨架：用实时盘口深度、手续�
 2. **Multi-outcome complete-set**：三个及以上结果同样锁完全集，公式相同。
 3. **Maker spread**：只在挂买价 + 对侧可成交路径的净 edge ≥ **0.2¢ (0.002)**，且库存风险被完全对冲时才记账。
 4. ~~**Copy-follow**（新增允许类型）~~ — **DISABLED / removed from allow list.** 跟单、观察名单、copy 账本、mirror、停跟 / 重扫全部暂停，直到 **poly金融** 重新开放该类型。历史规则见 [`docs/copy_follow_rules.md`](docs/copy_follow_rules.md)。纸面钩子见 [`docs/copy_trading.md`](docs/copy_trading.md)。**不要删文件 / 不要抹 git 历史。**
+5. **Whiskas inventory** — 纸面 BTC 5m Up/Down **双边库存 / pairing**（每轮买 Up+Down，clip **50**，+6s / 剩余 ≤100s 停，买价 ≤0.89，组合 ≤1.05，不中途卖）。**不是** copy-follow，**不是** 80¢ 单边追涨。账本 **`whiskas-inv`** @ **2300**。规则：[`docs/whiskas_inventory_rules.md`](docs/whiskas_inventory_rules.md)。
 
 ### Copy-trading 观察（纸面）— **DISABLED**
 
-> **Finance freeze：** copy-trading **entirely DISABLED**（watchlist、copy ledgers、mirror、stop-follow / rescan）。playbook 另档蒸馏。当前允许名单 = **lock arb + maker only**。赛跑只跑 **`main_arb`**：起始 **1000** → 目标 **2000**，24h paper，REVIEW **10% / <900**，HARD **25% / <750**。Lock-arb 门槛不变。
+> **Finance freeze：** copy-trading **entirely DISABLED**（watchlist、copy ledgers、mirror、stop-follow / rescan）。playbook 另档蒸馏。当前允许名单 = **lock arb + maker**（`arb-main` 记账暂停）+ **whiskas_inventory**（赛跑账本）。赛跑只跑 **`whiskas-inv`**：起始 **2300**，每轮上限 **1200**，REVIEW **10% / <2070**，HARD **25% / <1725**。未另设目标。Lock-arb 门槛不变。24h paper。
 
 ~~poly金融新增允许策略：跟单观察 → 小仓纸面。~~ **已移出允许名单。** YES+NO / complete-set / maker 套利照旧，且是**唯一**允许类型。
 
 - 观察名单（**PAUSED**）：~~`x-MoneyForWhiskas`（BTC 5m，主领，全日 / 24h）~~、~~`0xcd30457c79`（BTC 5m）~~、~~`goldfisherrr`（BTC 15m）~~。在金融重新开放前不要跟、不要重扫。
 - ~~停跟 / 重扫 / Mirror chase~~ — **DISABLED**。
-- ~~每个领单独立 paper 账本~~ — copy 账本 **paused**。赛跑见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)：**仅 `main_arb`**，起始 **1000 USD**，先到 **2000 USD**（`distance_to_2000`）。
-- 回撤（`main_arb`）：10% 或权益低于 **900** 打 `REVIEW`（继续扫）；25% 或权益低于 **750** 才 `SKIP`。
-- 原有 25% / 40% / 同时 ≤3 仍按 **`main_arb`** 现金生效。~~Copy 账本可连续扫描~~ — **DISABLED**。
+- ~~每个领单独立 paper 账本~~ — copy 账本 **paused**。赛跑见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)：**`whiskas-inv`**，起始 **2300 USD**（`distance_to_start` / pnl；未另设目标）。`arb-main` 记账暂停。
+- 回撤（`whiskas-inv`）：10% 或权益低于 **2070** 打 `REVIEW`（继续扫）；25% 或权益低于 **1725** 才 `SKIP`。
+- 原有 25% / 40% / 同时 ≤3 仍按暂停中的 **`arb-main`** 现金生效（若重新开放记账）。~~Copy 账本可连续扫描~~ — **DISABLED**。
 - `MirrorExecutor` stub 仍在树里（测试用）；**不是** ops 路径，**不写账本、不下单**。
 
 运行时闸门与 #12 一致：`config/paper.yaml` → `copy.enabled: false`（`config/copy.yaml` 同样为 false）。`config/copy.yaml` 仅作历史 / loader 测试引用。赛跑规则见 `docs/multi_ledger_race.md`。
@@ -75,7 +76,7 @@ python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.j
 
 持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：按 `ledger_id` 拆分 fills、cash、equity、pnl、`distance_to_2000`、win_rate、open exposure、`screened_n`、`below_floor_n`、`median_net_edge`、`median_net_edge_kind=raw|walked`、`best_binary` / `best_set`、review/halt）。SCREEN 扫到的市场即使因 raw-below-floor 跳过 walk / 不成交，也会进入诊断计数，避免 `scanned=0` 看起来像“什么都没扫”。
 
-**24h paper 已冻结（ops）。** 不再要求 America/New_York 08:00–23:00 时段门；默认连续 **24h** / **00:00–24:00 ET**。`config/paper.yaml` 为 `session.enabled: false`，**没有** 08:00–23:00。`booked=0` escalate 按**日历连续 24h** 计（已无 off-hours）。~~Copy 账本可连续扫描以镜像全日领单（优先 `x-MoneyForWhiskas`）。~~ Copy 账本与观察名单 **paused**，直到金融重新开放该类型。赛跑只跑 **`main_arb`**：10% 或权益低于 **900** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **750** 才 `SKIP drawdown_halt`。900 不是硬停地板。
+**24h paper 已冻结（ops）。** 不再要求 America/New_York 08:00–23:00 时段门；默认连续 **24h** / **00:00–24:00 ET**。`config/paper.yaml` 为 `session.enabled: false`，**没有** 08:00–23:00。`booked=0` escalate 按**日历连续 24h** 计（已无 off-hours）。~~Copy 账本可连续扫描以镜像全日领单（优先 `x-MoneyForWhiskas`）。~~ Copy 账本与观察名单 **paused**，直到金融重新开放该类型。赛跑只跑 **`whiskas-inv`**：10% 或权益低于 **2070** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **1725** 才 `SKIP drawdown_halt`。`arb-main` 记账暂停。
 
 ```bash
 poly-paper --loop
@@ -83,9 +84,9 @@ poly-paper --loop
 
 发现面会同时拉 CLOB `sampling-markets` + `markets`（可翻页）和 Gamma 活跃市场 / 多结果事件。YES+NO 与 complete-set 会在多个数量上 walk 盘口（不只看最深一档），门槛与风控不变。
 
-配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型（**DISABLED**）见 `docs/copy_follow_rules.md`。赛跑（**仅 `main_arb`，1000 → 2000**）见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)。
+配置在 `config/paper.yaml`：起始余额、edge 门槛、仓位上限、CLOB/Gamma 公共端点、**whiskas 库存旋钮**。加载器会拒绝放宽这些硬约束。硬公式见 `docs/edge_position_rules.md`。跟单类型（**DISABLED**）见 `docs/copy_follow_rules.md`。Whiskas inventory 见 [`docs/whiskas_inventory_rules.md`](docs/whiskas_inventory_rules.md)。赛跑（**`whiskas-inv` @ 2300**，`arb-main` 记账暂停）见 [`docs/multi_ledger_race.md`](docs/multi_ledger_race.md)。
 
-账本是 `data/paper_ledger.jsonl`（**`main_arb` / arb-main**，当前唯一赛跑账本）。同目录历史 `copy-<leader>.jsonl` **paused**，不入赛。只追加、带哈希链。没有 `set_balance`。`main_arb` 余额 = 1000 − Σ cash_debit + Σ cash_credit；权益 = 现金 + 已锁定完全集兑付。
+账本是 `data/whiskas-inv.jsonl`（**`whiskas-inv`**，当前赛跑账本）+ `data/paper_ledger.jsonl`（**`arb-main`**，记账暂停）。同目录历史 `copy-<leader>.jsonl` **paused**，不入赛。只追加、带哈希链。没有 `set_balance`。`whiskas-inv` 余额 = 2300 − Σ cash_debit + Σ 结算兑付；配对库存按 min(Up,Down) 计入 locked。
 
 ## 测试
 
@@ -101,15 +102,16 @@ pytest
 ```
 config/paper.yaml            # 硬约束 + 公共端点
 config/copy.yaml             # 历史 copy 观察名单 / 停跟（DISABLED；loader 测试引用）
-docs/multi_ledger_race.md    # 赛跑 freeze：仅 main_arb 1000 → 2000，24h paper
+docs/multi_ledger_race.md    # 赛跑：whiskas-inv @ 2300；arb-main 记账暂停；24h paper
 docs/copy_follow_rules.md    # 跟单规则 v1 — DISABLED / 移出允许名单
-docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)；允许名单 = lock arb + maker
+docs/edge_position_rules.md  # 冻结的 edge / 手续费 / 仓位规则 (v1)；lock arb + maker + whiskas inventory
 docs/copy_trading.md         # copy 观察、停跟、重扫、mirror stub — DISABLED
+docs/whiskas_inventory_rules.md  # BTC 5m Up/Down 库存 pairing（paper）；不是 copy-follow
 src/polybot/
   copy/                    # 历史 stub（watchlist / monitor / mirror）；非 ops 路径
   ledger/                  # 追加式 paper 账本
   market/                  # CLOB 只读客户端、盘口 walk、fd 费率
-  strategy/                # yes_no_lock / complete_set / maker_spread
+  strategy/                # yes_no_lock / complete_set / maker_spread / whiskas_inventory
   risk/                    # 仓位与禁止项
   runner/                  # poly-paper CLI
 tests/

@@ -8,7 +8,7 @@ from polybot.copy.executor import MirrorExecutor
 from polybot.copy.metrics import InMemoryMetricsProvider, LeaderMetrics
 from polybot.copy.monitor import EVENT_STOP_FOLLOW, CopyMonitor
 from polybot.copy.watchlist import load_watchlist
-from polybot.ledger.accounts import ARB_MAIN_ID, copy_account_id, open_account_book
+from polybot.ledger.accounts import ARB_MAIN_ID, WHISKAS_INV_ID, copy_account_id, open_account_book
 from polybot.ledger.store import PaperLedger
 from polybot.runner.paper import PaperRunner
 from polybot.runner.summary import DailySnapshot, format_daily, format_rank_lines, format_summary
@@ -50,7 +50,10 @@ def test_default_config_opens_only_arb_main(tmp_path: Path):
     cfg = cfg.__class__(**{**cfg.__dict__, "ledger_path": tmp_path / "arb-main.jsonl"})
     book = open_account_book(cfg)
     ids = [account.account_id for account in book.accounts]
-    assert ids == [ARB_MAIN_ID]
+    assert ids == [ARB_MAIN_ID, WHISKAS_INV_ID]
+    assert book.arb().paused is True
+    assert book.whiskas() is not None
+    assert book.whiskas().state().cash == Decimal("2300")
     assert book.copy_accounts() == []
     assert book.copy_for("x-MoneyForWhiskas") is None
     assert book.arb().state().cash == Decimal("1000")
@@ -74,7 +77,8 @@ def test_disabled_copy_skips_runtime_modules(tmp_path: Path):
     runner = PaperRunner(cfg, market=_EmptyMarket())  # type: ignore[arg-type]
     assert runner.copy_watchlist is None
     assert runner.copy_monitor is None
-    assert [account.account_id for account in runner.book.accounts] == [ARB_MAIN_ID]
+    assert [account.account_id for account in runner.book.accounts] == [ARB_MAIN_ID, WHISKAS_INV_ID]
+    assert runner.book.arb().paused is True
     report = runner.run_cycle()
     assert report.copy_events == ()
     assert all("copy-" not in line for line in report.messages)

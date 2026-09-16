@@ -7,12 +7,21 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable
 
-from polybot.config import PaperConfig, copy_runtime_enabled
+from polybot.config import PaperConfig, copy_runtime_enabled, whiskas_runtime_enabled
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, MetricsProvider
 from polybot.copy.monitor import EVENT_STOP_FOLLOW, CopyEvent, CopyMonitor
 from polybot.copy.watchlist import Watchlist, load_watchlist
-from polybot.ledger.accounts import ARB_MAIN_ID, AccountBook, open_account_book
+from polybot.ledger.accounts import (
+    ARB_MAIN_ID,
+    AccountBook,
+    drawdown_params,
+    open_account_book,
+    race_primary_id,
+    race_target,
+)
 from polybot.ledger.store import PaperLedger
+from polybot.market.whiskas import normalize_winner
+from polybot.strategy.whiskas_inventory import WhiskasInventoryStrategy, whiskas_window
 from polybot.market.client import LiveOrderForbidden, PaperMarketClient
 from polybot.risk.drawdown import DrawdownDecision, classify_drawdown
 from polybot.runner.summary import (
@@ -130,6 +139,8 @@ class PaperRunner:
         self.market = market or PaperMarketClient(config)
         self.risk = self.book.arb().risk
         self.strategies = default_strategies()
+        self.whiskas_strategy = WhiskasInventoryStrategy() if whiskas_runtime_enabled(config.whiskas) else None
+        self.race_id = race_primary_id(config)
         self.account_stats: dict[str, SessionStats] = {
             account.account_id: SessionStats() for account in self.book.accounts
         }
@@ -152,12 +163,19 @@ class PaperRunner:
             self.copy_monitor = CopyMonitor(config.copy, self.copy_watchlist, provider)
 
     def status_line(self, state: LedgerState, account_id: str = ARB_MAIN_ID) -> str:
-        progress = (state.equity / self.config.target_balance) * Decimal("100")
-        distance = self.config.target_balance - state.equity
+        from polybot.runner.summary import distance_field
+
+        goal = race_target(self.config, account_id)
+        progress = (state.equity / goal) * Decimal("100") if goal else Decimal("0")
+        target_txt = f"target={goal} ({progress:.2f}%)" if goal is not None else "target=n/a"
+        cap = None
+        if self.config.whiskas and account_id == self.config.whiskas.account_id:
+            cap = self.config.whiskas.per_round_notional_cap
+        cap_txt = f" round_cap={cap:.4f}" if cap is not None else ""
         return (
             f"account={account_id} cash={state.cash:.4f} locked={state.locked_payout:.4f} "
-            f"equity={state.equity:.4f} target={self.config.target_balance} "
-            f"({progress:.2f}%) distance_to_2000={distance:.4f} "
+            f"equity={state.equity:.4f} {target_txt}{cap_txt} "
+            f"{distance_field(state, goal)} "
             f"open={state.open_count}/{self.config.max_concurrent_open} "
             f"exposure={state.open_exposure:.4f}"
         )
@@ -165,13 +183,14 @@ class PaperRunner:
     def _account_dd(self, account_id: str, state: LedgerState) -> DrawdownDecision:
         watch = self.watches[account_id]
         watch.observe_equity(state.equity)
+        review_pct, halt_pct, review_floor, halt_floor = drawdown_params(self.config, account_id)
         return classify_drawdown(
             equity=state.equity,
             peak=watch.peak_equity,
-            review_pct=self.config.drawdown_review_pct,
-            halt_pct=self.config.drawdown_halt_pct,
-            review_floor=self.config.drawdown_review_floor_usd,
-            halt_floor=self.config.drawdown_halt_floor_usd,
+            review_pct=review_pct,
+            halt_pct=halt_pct,
+            review_floor=review_floor,
+            halt_floor=halt_floor,
         )
 
     def run_forever(self, max_loops: int | None = None, once: bool = False) -> CycleReport:
@@ -201,6 +220,18 @@ class PaperRunner:
         dd = self._account_dd(ARB_MAIN_ID, state)
         messages = [self.status_line(state, ARB_MAIN_ID)]
         self._log_drawdown(messages, state, dd, account_id=ARB_MAIN_ID)
+        whiskas_account = self.book.whiskas()
+        if whiskas_account is not None:
+            whiskas_state = whiskas_account.state()
+            whiskas_dd = self._account_dd(whiskas_account.account_id, whiskas_state)
+            messages.append(self.status_line(whiskas_state, whiskas_account.account_id))
+            self._log_drawdown(messages, whiskas_state, whiskas_dd, account_id=whiskas_account.account_id)
+            if whiskas_dd.halt and not whiskas_account.paused:
+                whiskas_account.paused = True
+                messages.append(
+                    f"SKIP drawdown_halt account={whiskas_account.account_id} "
+                    f"(HARD; whiskas-inv only)"
+                )
         for account in self.book.copy_accounts():
             other = account.state()
             other_dd = self._account_dd(account.account_id, other)
@@ -257,7 +288,7 @@ class PaperRunner:
                 copy_events=copy_events,
             )
 
-        if dd.halt:
+        if dd.halt and not whiskas_runtime_enabled(self.config.whiskas):
             self.watch.note_booked(0, now, self.config.idle_zero_fill_hours)
             return self._finish_cycle(
                 state=state,
@@ -286,7 +317,11 @@ class PaperRunner:
         rejected_risk = 0
         snapshot_failures = 0
         for target in targets:
-            if state.open_count + booked >= self.config.max_concurrent_open:
+            if (
+                not self.book.arb().paused
+                and not dd.halt
+                and state.open_count + booked >= self.config.max_concurrent_open
+            ):
                 messages.append("hit concurrent-open cap; stopping this cycle")
                 logger.info("CYCLE stop: concurrent-open cap")
                 break
@@ -313,6 +348,11 @@ class PaperRunner:
                 continue
             for opportunity in found:
                 candidates += 1
+                if self.book.arb().paused or dd.halt:
+                    skipped += 1
+                    rejected_risk += 1
+                    logger.info("SKIP book account=%s paused_or_halted", ARB_MAIN_ID)
+                    continue
                 accepted = self._maybe_book(snapshot, opportunity)
                 if accepted:
                     booked += 1
@@ -335,42 +375,64 @@ class PaperRunner:
             self.stats.screened_n += scanned
             if self.stats.median_net_edge_kind is None:
                 self.stats.median_net_edge_kind = "walked"
+        arb_booked, arb_scanned, arb_candidates = booked, scanned, candidates
+        whiskas_booked, whiskas_scanned, whiskas_candidates, whiskas_skip, whiskas_rej = self._run_whiskas(
+            now, messages
+        )
+        booked += whiskas_booked
+        scanned += whiskas_scanned
+        candidates += whiskas_candidates
+        skipped += whiskas_skip
+        rejected_risk += whiskas_rej
         self.stats.record_cycle(
-            scanned=scanned,
-            candidates=candidates,
-            booked=booked,
+            scanned=arb_scanned,
+            candidates=arb_candidates,
+            booked=arb_booked,
             rejected_edges=rejected_edges,
-            rejected_risk=rejected_risk,
+            rejected_risk=rejected_risk - whiskas_rej,
             snapshot_failures=snapshot_failures,
         )
-        triggered = self.watch.note_booked(booked, now, self.config.idle_zero_fill_hours)
-        if booked == 0:
+        if whiskas_account is not None:
+            self.account_stats[whiskas_account.account_id].record_cycle(
+                scanned=whiskas_scanned,
+                candidates=whiskas_candidates,
+                booked=whiskas_booked,
+                rejected_edges=0,
+                rejected_risk=whiskas_rej,
+                snapshot_failures=0,
+            )
+        if whiskas_account is not None:
+            idle_watch = self.watches[whiskas_account.account_id]
+            idle_booked = whiskas_booked
+            triggered = idle_watch.note_booked(idle_booked, now, self.config.idle_zero_fill_hours)
+        else:
+            idle_watch = self.watch
+            idle_booked = booked
+            triggered = idle_watch.note_booked(idle_booked, now, self.config.idle_zero_fill_hours)
+        if idle_booked == 0:
             idle = (
-                f"IDLE booked=0 streak_cycles={self.watch.zero_book_cycles} "
-                f"wall_clock_hours={self.watch.idle_hours(now):.2f} "
+                f"IDLE booked=0 streak_cycles={idle_watch.zero_book_cycles} "
+                f"wall_clock_hours={idle_watch.idle_hours(now):.2f} "
                 f"threshold={self.config.idle_zero_fill_hours}"
             )
             messages.append(idle)
             logger.info(idle)
         if triggered:
             trig = (
-                f"TRIGGER idle_zero_fill hours={self.watch.idle_hours(now):.2f} "
+                f"TRIGGER idle_zero_fill hours={idle_watch.idle_hours(now):.2f} "
                 f"(wall-clock continuous booked=0; threshold={self.config.idle_zero_fill_hours})"
             )
             messages.append(trig)
             logger.info(trig)
-        state = self.ledger.state()
-        self.watch.observe_equity(state.equity)
-        after = classify_drawdown(
-            equity=state.equity,
-            peak=self.watch.peak_equity,
-            review_pct=self.config.drawdown_review_pct,
-            halt_pct=self.config.drawdown_halt_pct,
-            review_floor=self.config.drawdown_review_floor_usd,
-            halt_floor=self.config.drawdown_halt_floor_usd,
-        )
-        if (after.review, after.halt) != (dd.review, dd.halt):
-            self._log_drawdown(messages, state, after)
+        if whiskas_account is not None:
+            state = whiskas_account.state()
+            after = self._account_dd(whiskas_account.account_id, state)
+        else:
+            state = self.ledger.state()
+            self.watch.observe_equity(state.equity)
+            after = self._account_dd(ARB_MAIN_ID, state)
+            if (after.review, after.halt) != (dd.review, dd.halt):
+                self._log_drawdown(messages, state, after)
         return self._finish_cycle(
             state=state,
             messages=messages,
@@ -380,12 +442,107 @@ class PaperRunner:
             skipped=skipped,
             rejected_edges=rejected_edges,
             rejected_risk=rejected_risk,
-            skipped_reason="drawdown_halt" if after.halt else "",
+            skipped_reason="drawdown_halt" if after.halt and whiskas_account is None else (
+                "drawdown_halt" if whiskas_account is not None and after.halt else ""
+            ),
             in_session=True,
             now=now,
             drawdown=after,
             copy_events=copy_events,
         )
+
+    def _run_whiskas(self, now: datetime, messages: list[str]) -> tuple[int, int, int, int, int]:
+        """Book inventory clips on whiskas-inv. Never writes arb-main. No sells."""
+        account = self.book.whiskas()
+        if account is None or self.whiskas_strategy is None or self.config.whiskas is None:
+            return 0, 0, 0, 0, 0
+        if account.paused:
+            messages.append(f"SKIP whiskas booking account={account.account_id} paused")
+            return 0, 0, 0, 1, 0
+        booked = 0
+        scanned = 0
+        candidates = 0
+        skipped = 0
+        rejected = 0
+        for target in self._whiskas_targets():
+            snapshot = self._snapshot(target)
+            scanned += 1
+            if snapshot is None:
+                skipped += 1
+                continue
+            redeemed = self._maybe_redeem_whiskas(account, snapshot, now, messages)
+            if redeemed:
+                continue
+            spent = account.ledger.round_notional(snapshot.condition_id)
+            found = self.whiskas_strategy.scan(
+                snapshot, self.config, now=now, round_notional=spent
+            )
+            if not found:
+                open_ok, reason = whiskas_window(snapshot, now, self.config.whiskas)
+                if not open_ok:
+                    logger.info("SKIP whiskas %s %s", reason, snapshot.question[:60])
+                skipped += 1
+                continue
+            for opportunity in found:
+                if any(leg.side == "SELL" for leg in opportunity.legs):
+                    rejected += 1
+                    logger.error("REJECT whiskas sell forbidden")
+                    continue
+                candidates += 1
+                decision = account.risk.evaluate(opportunity, account.state())
+                if not decision.allowed:
+                    rejected += 1
+                    logger.info("REJECT whiskas risk: %s", decision.reason)
+                    continue
+                fill = account.ledger.append_fill(opportunity)
+                booked += 1
+                self.watches[account.account_id].observe_equity(account.state().equity)
+                line = (
+                    f"BOOK whiskas_inventory {snapshot.question[:80]} "
+                    f"size={opportunity.size} notional={opportunity.notional:.4f} "
+                    f"legs={len(opportunity.legs)} hash={fill.hash[:12]}"
+                )
+                messages.append(line)
+                logger.info(line)
+        return booked, scanned, candidates, skipped, rejected
+
+    def _whiskas_targets(self) -> list[ScanTarget]:
+        if hasattr(self.market, "list_whiskas_targets"):
+            return list(self.market.list_whiskas_targets())
+        return []
+
+    def _maybe_redeem_whiskas(self, account, snapshot: MarketSnapshot, now: datetime, messages: list[str]) -> bool:
+        if self.config.whiskas is None:
+            return False
+        shares = account.ledger.inventory_shares(snapshot.condition_id)
+        if shares["Up"] <= 0 and shares["Down"] <= 0:
+            return False
+        ended = False
+        if snapshot.round_end is not None:
+            end = snapshot.round_end if snapshot.round_end.tzinfo else snapshot.round_end.replace(tzinfo=timezone.utc)
+            current = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+            ended = current >= end
+        if not snapshot.resolved and not ended:
+            return False
+        winner = normalize_winner(snapshot.winner, self.config.whiskas)
+        if winner is None:
+            logger.info("WAIT whiskas settlement event=%s (no winner yet)", snapshot.condition_id)
+            return False
+        credit = shares.get(winner, Decimal("0"))
+        fill = account.ledger.append_redemption(
+            event_id=snapshot.condition_id,
+            winner=winner,
+            cash_credit=credit,
+            question=snapshot.question,
+            notes=f"redeem winner={winner}",
+        )
+        line = (
+            f"REDEEM whiskas_inventory {snapshot.question[:80]} winner={winner} "
+            f"credit={credit:.4f} hash={fill.hash[:12]}"
+        )
+        messages.append(line)
+        logger.info(line)
+        return True
 
     def _empty_report(self, state: LedgerState, message: str) -> CycleReport:
         now = self._now()
@@ -414,12 +571,13 @@ class PaperRunner:
         account_id: str = ARB_MAIN_ID,
     ) -> None:
         watch = self.watches[account_id]
+        review_pct, halt_pct, review_floor, halt_floor = drawdown_params(self.config, account_id)
         if dd.review:
             line = dd.review_line(
                 peak=watch.peak_equity,
                 equity=state.equity,
-                review_pct=self.config.drawdown_review_pct,
-                review_floor=self.config.drawdown_review_floor_usd,
+                review_pct=review_pct,
+                review_floor=review_floor,
             )
             line = f"{line} account={account_id}"
             messages.append(line)
@@ -428,8 +586,8 @@ class PaperRunner:
             line = dd.halt_line(
                 peak=watch.peak_equity,
                 equity=state.equity,
-                halt_pct=self.config.drawdown_halt_pct,
-                halt_floor=self.config.drawdown_halt_floor_usd,
+                halt_pct=halt_pct,
+                halt_floor=halt_floor,
             )
             line = f"{line} account={account_id}"
             messages.append(line)
@@ -481,6 +639,10 @@ class PaperRunner:
             rank_rows.append((rank, account.account_id, acc_state))
             acc_stats = self.account_stats[account.account_id]
             acc_dd = self._account_dd(account.account_id, acc_state)
+            goal = race_target(self.config, account.account_id)
+            cap = None
+            if self.config.whiskas and account.account_id == self.config.whiskas.account_id:
+                cap = self.config.whiskas.per_round_notional_cap
             acc_summary = format_summary(
                 "SUMMARY",
                 self.config,
@@ -491,6 +653,8 @@ class PaperRunner:
                 drawdown_halt=acc_dd.halt,
                 account_id=account.account_id,
                 paused=account.paused,
+                target_balance=goal,
+                round_cap=cap,
             )
             acc_daily = format_daily(
                 self._daily_snapshot(acc_state, now, stats=acc_stats),
@@ -500,8 +664,10 @@ class PaperRunner:
                 drawdown_halt=acc_dd.halt,
                 account_id=account.account_id,
                 paused=account.paused,
+                target_balance=goal,
+                round_cap=cap,
             )
-            if account.account_id == ARB_MAIN_ID:
+            if account.account_id == self.race_id:
                 summary = acc_summary
                 daily = acc_daily
             if emit:
@@ -509,8 +675,9 @@ class PaperRunner:
                 messages.append(acc_daily)
                 logger.info(acc_summary)
                 logger.info(acc_daily)
-        rank_lines = tuple(format_rank_lines(rank_rows, self.config.target_balance))
-        winner = self.book.winner(self.config.target_balance)
+        target_map = {account.account_id: race_target(self.config, account.account_id) for account in self.book.accounts}
+        rank_lines = tuple(format_rank_lines(rank_rows, self.config.target_balance, targets=target_map))
+        winner = self.book.winner(self.config.target_balance, targets=target_map)
         if emit:
             for line in rank_lines:
                 messages.append(line)
@@ -663,6 +830,9 @@ class PaperRunner:
             )
 
     def _maybe_book(self, snapshot: MarketSnapshot, opportunity: Opportunity) -> Opportunity | None:
+        if self.book.arb().paused:
+            logger.info("SKIP book account=%s (booking paused; read-only scan)", ARB_MAIN_ID)
+            return None
         state = self.ledger.state()
         decision = self.risk.evaluate(opportunity, state)
         working = opportunity

@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from polybot.config import PaperConfig
+from datetime import datetime, timezone
+
+from polybot.config import PaperConfig, WhiskasConfig
 from polybot.types import BookLevel, FeeSchedule, MarketSnapshot, OutcomeBook
 
 
@@ -58,6 +60,58 @@ def outcome(
         asks=tuple(asks),
         tick_size=Decimal("0.01"),
         min_order_size=Decimal("1"),
+    )
+
+
+def whiskas_cfg(**overrides: object) -> WhiskasConfig:
+    values = dict(
+        enabled=True,
+        account_id="whiskas-inv",
+        starting_balance=Decimal("2300"),
+        target_balance=None,
+        clip_size=Decimal("50"),
+        enter_after_open_seconds=6.0,
+        stop_remaining_seconds=100.0,
+        max_buy_price=Decimal("0.89"),
+        combo_sum_cap=Decimal("1.05"),
+        per_round_notional_cap=Decimal("1200"),
+        pause_arb_main_booking=True,
+        drawdown_review_floor_usd=Decimal("2070"),
+        drawdown_halt_floor_usd=Decimal("1725"),
+    )
+    values.update(overrides)
+    return WhiskasConfig(**values)  # type: ignore[arg-type]
+
+
+def btc_updown_market(
+    up_asks: list[BookLevel],
+    down_asks: list[BookLevel],
+    *,
+    rate: str = "0.02",
+    taker_only: bool = True,
+    condition_id: str = "0xbtc5m",
+    round_open: datetime | None = None,
+    round_end: datetime | None = None,
+    resolved: bool = False,
+    winner: str | None = None,
+) -> MarketSnapshot:
+    opened = round_open or datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+    ends = round_end or datetime(2026, 9, 16, 12, 5, tzinfo=timezone.utc)
+    return MarketSnapshot(
+        condition_id=condition_id,
+        question="Bitcoin Up or Down - 8:00AM-8:05AM ET",
+        fee=FeeSchedule(rate=Decimal(rate), exponent=Decimal("2"), taker_only=taker_only),
+        outcomes=(
+            outcome("tok-up", "Up", up_asks),
+            outcome("tok-down", "Down", down_asks),
+        ),
+        min_order_size=Decimal("1"),
+        kind="binary",
+        slug="btc-updown-5m-test",
+        round_open=opened,
+        round_end=ends,
+        resolved=resolved,
+        winner=winner,
     )
 
 
