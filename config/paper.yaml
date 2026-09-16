@@ -73,14 +73,21 @@ copy:
   enabled: false
   path: config/copy.yaml
 
+# Owner halt: whiskas-inv must not paper-book. Loop must not trade.
+# Either flag is enough; both are set. Do not invent a new strategy.
+accounts:
+  whiskas-inv:
+    paused: true
+
 # Finance race: whiskas-inv (start 2300). No invented target — report pnl /
 # equity / per-round cap. Keep distance-to-target style when a target is set.
 # This is inventory / pairing, NOT copy-follow. copy.enabled stays false.
+# OWNER HALT: enabled=false — no paper booking on whiskas-inv.
 race:
   primary_account: whiskas-inv
 
 whiskas:
-  enabled: true
+  enabled: false
   account_id: whiskas-inv
   ledger_path: data/whiskas-inv.jsonl
   starting_balance_usd: 2300

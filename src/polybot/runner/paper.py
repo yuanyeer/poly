@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Callable
 
-from polybot.config import PaperConfig, copy_runtime_enabled, whiskas_runtime_enabled
+from polybot.config import (
+    PaperConfig,
+    account_booking_paused,
+    copy_runtime_enabled,
+    whiskas_runtime_enabled,
+)
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, MetricsProvider
 from polybot.copy.monitor import EVENT_STOP_FOLLOW, CopyEvent, CopyMonitor
 from polybot.copy.watchlist import Watchlist, load_watchlist
@@ -454,10 +459,17 @@ class PaperRunner:
     def _run_whiskas(self, now: datetime, messages: list[str]) -> tuple[int, int, int, int, int]:
         """Book inventory clips on whiskas-inv. Never writes arb-main. No sells."""
         account = self.book.whiskas()
-        if account is None or self.whiskas_strategy is None or self.config.whiskas is None:
+        if account is None:
             return 0, 0, 0, 0, 0
-        if account.paused:
-            messages.append(f"SKIP whiskas booking account={account.account_id} paused")
+        if (
+            not whiskas_runtime_enabled(self.config.whiskas)
+            or self.whiskas_strategy is None
+            or self.config.whiskas is None
+            or account.paused
+            or account_booking_paused(self.config, account.account_id)
+        ):
+            reason = "disabled" if not whiskas_runtime_enabled(self.config.whiskas) else "paused"
+            messages.append(f"SKIP whiskas booking account={account.account_id} {reason}")
             return 0, 0, 0, 1, 0
         booked = 0
         scanned = 0

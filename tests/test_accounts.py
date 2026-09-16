@@ -53,6 +53,7 @@ def test_default_config_opens_only_arb_main(tmp_path: Path):
     assert ids == [ARB_MAIN_ID, WHISKAS_INV_ID]
     assert book.arb().paused is True
     assert book.whiskas() is not None
+    assert book.whiskas().paused is True
     assert book.whiskas().state().cash == Decimal("2300")
     assert book.copy_accounts() == []
     assert book.copy_for("x-MoneyForWhiskas") is None
@@ -77,11 +78,15 @@ def test_disabled_copy_skips_runtime_modules(tmp_path: Path):
     runner = PaperRunner(cfg, market=_EmptyMarket())  # type: ignore[arg-type]
     assert runner.copy_watchlist is None
     assert runner.copy_monitor is None
+    assert runner.whiskas_strategy is None
     assert [account.account_id for account in runner.book.accounts] == [ARB_MAIN_ID, WHISKAS_INV_ID]
     assert runner.book.arb().paused is True
+    assert runner.book.whiskas() is not None and runner.book.whiskas().paused is True
     report = runner.run_cycle()
+    assert report.booked == 0
     assert report.copy_events == ()
     assert all("copy-" not in line for line in report.messages)
+    assert any("SKIP whiskas booking" in line for line in report.messages)
 
 
 def test_copy_ledgers_do_not_share_risk_rooms(tmp_path: Path):

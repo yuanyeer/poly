@@ -5,7 +5,12 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Literal
 
-from polybot.config import PaperConfig, copy_runtime_enabled, whiskas_runtime_enabled
+from polybot.config import (
+    PaperConfig,
+    account_booking_paused,
+    copy_runtime_enabled,
+    whiskas_runtime_enabled,
+)
 from polybot.ledger.store import PaperLedger
 from polybot.risk.gates import RiskEngine
 from polybot.types import LedgerState
@@ -130,7 +135,7 @@ def open_account_book(
 ) -> AccountBook:
     """Open arb-main. Optionally whiskas-inv. Copy ledgers only when copy.enabled."""
     arb_path = arb_ledger.path if arb_ledger is not None else config.ledger_path
-    pause_arb = whiskas_runtime_enabled(config.whiskas) and bool(
+    pause_arb = account_booking_paused(config, ARB_MAIN_ID) or bool(
         config.whiskas and config.whiskas.pause_arb_main_booking
     )
     arb = PaperAccount(
@@ -142,7 +147,7 @@ def open_account_book(
         paused=pause_arb,
     )
     accounts = [arb]
-    if whiskas_runtime_enabled(config.whiskas) and config.whiskas is not None:
+    if config.whiskas is not None:
         path = whiskas_ledger_path(config, arb_path)
         accounts.append(
             PaperAccount(
@@ -151,6 +156,7 @@ def open_account_book(
                 leader_id=None,
                 ledger=PaperLedger(path, config.whiskas.starting_balance),
                 risk=RiskEngine(config),
+                paused=account_booking_paused(config, config.whiskas.account_id),
             )
         )
     if copy_runtime_enabled(config.copy):
