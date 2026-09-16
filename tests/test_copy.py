@@ -80,6 +80,7 @@ def test_copy_follow_rules_v1_encoded_in_config():
     assert cfg.idle_zero_fill_hours == 24
     copy = cfg.copy
     assert copy is not None
+    assert copy.enabled is False
     assert copy.max_chase_slippage == Decimal(COPY_MAX_CHASE)
     assert copy.max_sleeve_pct == Decimal("0.30")
     assert copy.stop_peak_dd == Decimal("0.05")

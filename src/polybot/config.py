@@ -47,7 +47,7 @@ class CopyLeaderConfig:
 class CopyConfig:
     """Paper-only copy-trading observation. No live orders."""
 
-    enabled: bool = False
+    enabled: bool = False  # owner: DISABLED while distilling lock-arb; runtime must skip copy modules
     max_sleeve_pct: Decimal = Decimal(COPY_MAX_SLEEVE_PCT)
     stop_peak_dd: Decimal = Decimal(COPY_STOP_PEAK_DD)
     stop_path_dd: Decimal = Decimal(COPY_STOP_PATH_DD)
@@ -263,7 +263,7 @@ def parse_copy_config(raw: dict[str, Any], *, source_path: Path | None = None) -
     stub_raw = raw.get("metrics_stub")
     stub = Path(str(stub_raw)) if stub_raw else None
     return CopyConfig(
-        enabled=bool(raw.get("enabled", True)),
+        enabled=bool(raw.get("enabled", False)),
         max_sleeve_pct=_d(raw.get("max_sleeve_pct", COPY_MAX_SLEEVE_PCT)),
         stop_peak_dd=_d(stop.get("peak_dd", COPY_STOP_PEAK_DD)),
         stop_path_dd=_d(stop.get("path_dd", COPY_STOP_PATH_DD)),
@@ -293,6 +293,11 @@ def _load_copy(raw: dict[str, Any], paper_path: Path) -> CopyConfig | None:
         if enabled_override is not None:
             nested["enabled"] = enabled_override
     return parse_copy_config(nested, source_path=source)
+
+
+def copy_runtime_enabled(copy: CopyConfig | None) -> bool:
+    """True only when copy modules may run. False skips watchlist, copy ledgers, and MirrorExecutor."""
+    return copy is not None and copy.enabled
 
 
 def load_config(path: str | Path | None = None) -> PaperConfig:

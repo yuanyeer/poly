@@ -31,7 +31,7 @@ def test_load_default_config():
     assert cfg.drawdown_halt_pct == Decimal("0.25")
     assert cfg.drawdown_halt_floor_usd == Decimal("750")
     assert cfg.copy is not None
-    assert cfg.copy.enabled is True
+    assert cfg.copy.enabled is False
     assert cfg.copy.max_sleeve_pct == Decimal("0.30")
     assert cfg.copy.stop_peak_dd == Decimal("0.05")
     assert cfg.copy.stop_path_dd == Decimal("0.05")

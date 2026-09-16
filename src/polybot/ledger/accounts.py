@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from polybot.config import PaperConfig
+from polybot.config import PaperConfig, copy_runtime_enabled
 from polybot.ledger.store import PaperLedger
 from polybot.risk.gates import RiskEngine
 from polybot.types import LedgerState
@@ -75,7 +75,7 @@ def open_account_book(
     config: PaperConfig,
     arb_ledger: PaperLedger | None = None,
 ) -> AccountBook:
-    """Open arb-main plus one copy ledger per watchlist leader. Each starts independently."""
+    """Open arb-main. Copy ledgers are created only when copy.enabled is true."""
     arb_path = arb_ledger.path if arb_ledger is not None else config.ledger_path
     arb = PaperAccount(
         account_id=ARB_MAIN_ID,
@@ -85,7 +85,7 @@ def open_account_book(
         risk=RiskEngine(config),
     )
     accounts = [arb]
-    if config.copy is not None and config.copy.enabled:
+    if copy_runtime_enabled(config.copy):
         for leader in config.copy.leaders:
             path = copy_ledger_path(arb_path, leader.id)
             accounts.append(

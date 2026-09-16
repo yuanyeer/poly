@@ -43,25 +43,41 @@ def _leaders() -> tuple[CopyLeaderConfig, ...]:
     )
 
 
-def test_default_config_opens_isolated_arb_and_copy_ledgers(tmp_path: Path):
+def test_default_config_opens_only_arb_main(tmp_path: Path):
     cfg = load_config("config/paper.yaml")
+    assert cfg.copy is not None
+    assert cfg.copy.enabled is False
     cfg = cfg.__class__(**{**cfg.__dict__, "ledger_path": tmp_path / "arb-main.jsonl"})
     book = open_account_book(cfg)
     ids = [account.account_id for account in book.accounts]
-    assert ids == [
-        ARB_MAIN_ID,
-        "copy-x-MoneyForWhiskas",
-        "copy-0xcd30457c79",
-        "copy-goldfisherrr",
-    ]
-    assert all(account.state().cash == Decimal("1000") for account in book.accounts)
-    assert all(account.state().starting_balance == Decimal("1000") for account in book.accounts)
+    assert ids == [ARB_MAIN_ID]
+    assert book.copy_accounts() == []
+    assert book.copy_for("x-MoneyForWhiskas") is None
+    assert book.arb().state().cash == Decimal("1000")
     book.arb().ledger.append_fill(_opp())
     assert book.arb().state().cash == Decimal("990")
-    for account in book.copy_accounts():
-        assert account.state().cash == Decimal("1000")
-        assert account.state().open_count == 0
-        assert account.state().event_exposure == {}
+
+
+def test_disabled_copy_skips_runtime_modules(tmp_path: Path):
+    cfg = load_config("config/paper.yaml")
+    cfg = cfg.__class__(
+        **{**cfg.__dict__, "ledger_path": tmp_path / "arb-main.jsonl", "session_enabled": False}
+    )
+
+    class _EmptyMarket:
+        def list_condition_ids(self):
+            return []
+
+        def snapshot(self, condition_id: str):
+            return None
+
+    runner = PaperRunner(cfg, market=_EmptyMarket())  # type: ignore[arg-type]
+    assert runner.copy_watchlist is None
+    assert runner.copy_monitor is None
+    assert [account.account_id for account in runner.book.accounts] == [ARB_MAIN_ID]
+    report = runner.run_cycle()
+    assert report.copy_events == ()
+    assert all("copy-" not in line for line in report.messages)
 
 
 def test_copy_ledgers_do_not_share_risk_rooms(tmp_path: Path):
