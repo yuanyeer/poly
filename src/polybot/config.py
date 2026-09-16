@@ -52,12 +52,12 @@ class PaperConfig:
     size_probe_steps: int = 8
     summary_every_cycles: int = 1
     skip_walk_if_raw_below_floor: bool = True
-    # FINAL default from poly 负责人: America/New_York 09:00–22:00 local (DST).
+    # FINAL default from poly 负责人: America/New_York 08:00–23:00 local (DST).
     # Not 24h. Outside the window the loop must not scan.
     session_enabled: bool = True
     session_timezone: str = "America/New_York"
-    session_start: str = "09:00"
-    session_end: str = "22:00"
+    session_start: str = "08:00"
+    session_end: str = "23:00"
     # booked=0 streak counts only in-window cycles (not wall-clock 24h).
     # Overnight idle between end and next start does not increment it.
     # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
@@ -206,8 +206,8 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         skip_walk_if_raw_below_floor=bool(scan.get("skip_walk_if_raw_below_floor", True)),
         session_enabled=bool(session.get("enabled", True)),
         session_timezone=str(session.get("timezone") or "America/New_York"),
-        session_start=str(session.get("start") or "09:00"),
-        session_end=str(session.get("end") or "22:00"),
+        session_start=str(session.get("start") or "08:00"),
+        session_end=str(session.get("end") or "23:00"),
         idle_zero_fill_sessions=max(1, int(session.get("idle_zero_fill_sessions", 2))),
         drawdown_review_pct=_d(session.get("drawdown_review_pct", "0.10")),
         drawdown_review_floor_usd=_d(session.get("drawdown_review_floor_usd", "180")),

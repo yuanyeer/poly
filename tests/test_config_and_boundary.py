@@ -24,8 +24,8 @@ def test_load_default_config():
     assert cfg.max_concurrent_open == 3
     assert cfg.session_enabled is True
     assert cfg.session_timezone == "America/New_York"
-    assert cfg.session_start == "09:00"
-    assert cfg.session_end == "22:00"
+    assert cfg.session_start == "08:00"
+    assert cfg.session_end == "23:00"
     assert cfg.idle_zero_fill_sessions == 2
     assert cfg.drawdown_review_pct == Decimal("0.10")
     assert cfg.drawdown_review_floor_usd == Decimal("180")

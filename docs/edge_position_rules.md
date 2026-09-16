@@ -11,8 +11,9 @@ This file is the frozen source of truth for paper-mode edge, fee, depth-walk, an
 - `MAX_NOTIONAL_FRAC = 0.25`  # per trade vs current cash
 - `MAX_EVENT_EXPOSURE_FRAC = 0.40`  # sum notional same event vs cash
 - `MAX_OPEN_OPPS = 3`
-- `MIN_EDGE_TAKER = 0.005`  # 0.5¢
+- `MIN_EDGE_TAKER = 0.005`  # 0.5¢ — lock arb (YES+NO / complete-set) only
 - `MIN_EDGE_MAKER = 0.002`  # 0.2¢
+- `COPY_MAX_CHASE = 0.01`  # 1¢ per share; copy-follow legs only (see `docs/copy_follow_rules.md`)
 
 ## Fee (CLOB V2 style)
 
@@ -74,6 +75,20 @@ Post-only quotes only when:
 
 Paper fill: match only when live book trades through our price (or sim fill model agreed with eng).
 
+### D) Copy-follow (newly allowed)
+
+Source of truth: [`docs/copy_follow_rules.md`](copy_follow_rules.md). Lock arb (YES+NO / complete-set) and maker floors above are unchanged.
+
+Copy legs have no YES+NO lock edge. The chase gate **replaces `MIN_EDGE_TAKER` for copy legs only**:
+
+```
+# reject fill if
+abs(fill_px - leader_px) + fee/size > COPY_MAX_CHASE
+# COPY_MAX_CHASE = 0.01 (1¢) per share
+```
+
+Do not apply `MIN_EDGE_TAKER` (0.5¢) to copy legs. Do not apply `COPY_MAX_CHASE` to lock-arb or maker legs.
+
 ## Position gates (all must pass)
 
 ```
@@ -101,9 +116,9 @@ Single local paper ledger; every fill: cash/position/PnL update from walked pric
 
 Paper-only operational stop/review notes. They do **not** change edge floors, fee formulas, or position gates above.
 
-1. **Trading window (ops finalized)** — Default window is **America/New_York 09:00–22:00** (follows DST; roughly **UTC 13:00–02:00**). **Not 24h.** China-local wall clock is **not** authoritative.
+1. **Trading window (ops finalized)** — Default window is **America/New_York 08:00–23:00** (follows DST; roughly **UTC 12:00–03:00** EDT / **13:00–04:00** EST). **Not 24h.** China-local wall clock is **not** authoritative.
 
-2. **连续 24h booked=0 (escalate)** — Escalate / strategy-review when `booked=0` accumulates to ~24h. The meter is still **cumulative time inside this trading window only** (**America/New_York 09:00–22:00**). Off-hours (scanner stopped / outside NY 09:00–22:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
+2. **连续 24h booked=0 (escalate)** — Escalate / strategy-review when `booked=0` accumulates to ~24h. The meter is still **cumulative time inside this trading window only** (**America/New_York 08:00–23:00**). Off-hours (scanner stopped / outside NY 08:00–23:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
 
 3. **Drawdown — two tiers (do not collapse)** — Live, real time: compare current paper ledger equity vs peak. This watch does **not** pause outside the trading window.
 
@@ -112,11 +127,11 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 ## Trading session (implemented)
 
-Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DST (EST/EDT). The interval is `[start, end)` on the local clock. Weekends use the same hours.
+Default window is **America/New_York 08:00–23:00 local**. `zoneinfo` honors DST (EST/EDT). The interval is `[start, end)` on the local clock. Weekends use the same hours.
 
 - Encoded in `config/paper.yaml` → `session` so hours can be edited without code changes.
 - **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
-- Continuous `booked=0` **escalate** still uses **cumulative trading-window time** only (**America/New_York 09:00–22:00**), **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
+- Continuous `booked=0` **escalate** still uses **cumulative trading-window time** only (**America/New_York 08:00–23:00**), **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 23:00–08:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
 - Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). Two tiers — do not collapse:
   - **Escalate / REVIEW** (ask **poly金融**): peak drawdown ≥ **10%** OR equity < **180**. **Continue scanning; do NOT hard-stop.**
   - **Hard halt / SKIP**: peak drawdown ≥ **25%** (`drawdown_halt_pct`) OR equity < **150**. Stops scanning (`SKIP drawdown_halt`) even while the session is open. **150 is intentionally below 180** so the floors do not collide.

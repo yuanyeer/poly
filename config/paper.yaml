@@ -60,12 +60,12 @@ min_fill_size: 1
 #   escalate / REVIEW: peak DD ≥ 10% OR equity < 180 — continue scanning; do NOT hard-stop
 #   hard halt / SKIP: peak DD ≥ 25% OR equity < 150 — stops trading
 #   150 is intentionally below 180 so the floors do not collide
-# booked=0 escalate still uses cumulative NY 09:00–22:00 window time only.
+# booked=0 escalate still uses cumulative NY 08:00–23:00 window time only.
 session:
   enabled: true
   timezone: America/New_York
-  start: "09:00"
-  end: "22:00"
+  start: "08:00"
+  end: "23:00"
   idle_zero_fill_sessions: 2
   drawdown_review_pct: 0.10
   drawdown_review_floor_usd: 180
