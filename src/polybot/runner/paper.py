@@ -26,7 +26,7 @@ from polybot.runner.summary import (
 from polybot.session import in_trading_window, local_now, session_label
 from polybot.strategy import default_strategies
 from polybot.strategy.sizer import resize_to_book
-from polybot.types import LedgerState, MarketSnapshot, Opportunity, ScanTarget
+from polybot.types import LedgerState, MarketSnapshot, MedianEdgeKind, Opportunity, ScanTarget, ScreenTape
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +276,8 @@ class PaperRunner:
             )
 
         targets = self._targets()
+        screen = self._consume_screen_tape()
+        diag_kind = self._ingest_screen_diagnostics(screen)
         booked = 0
         skipped = 0
         candidates = 0
@@ -301,7 +303,8 @@ class PaperRunner:
                 len(snapshot.outcomes),
                 snapshot.question[:80],
             )
-            self._record_market_edge(snapshot)
+            if diag_kind != "raw":
+                self._record_market_edge(snapshot, count_below=screen is None)
             found = self._scan_market(snapshot)
             if not found:
                 rejected_edges += 1
@@ -324,6 +327,14 @@ class PaperRunner:
                 else:
                     skipped += 1
                     rejected_risk += 1
+        if screen is not None and diag_kind == "walked":
+            self._walk_below_floor_diagnostics(screen)
+            if not self.stats.net_edges and screen.raw_edges:
+                self.stats.record_diagnostic_edges(screen.raw_edges, kind="raw")
+        if screen is None:
+            self.stats.screened_n += scanned
+            if self.stats.median_net_edge_kind is None:
+                self.stats.median_net_edge_kind = "walked"
         self.stats.record_cycle(
             scanned=scanned,
             candidates=candidates,
@@ -429,8 +440,12 @@ class PaperRunner:
         return build_daily_snapshot(
             state,
             now,
+            screened_n=tape.screened_n,
             below_floor_n=tape.below_floor_n,
             median_net_edge=tape.median_net_edge,
+            median_net_edge_kind=tape.median_net_edge_kind,
+            best_binary=tape.best_binary,
+            best_set=tape.best_set,
         )
 
     def _finish_cycle(
@@ -540,7 +555,7 @@ class PaperRunner:
                     )
         return events
 
-    def _record_market_edge(self, snapshot: MarketSnapshot) -> None:
+    def _record_market_edge(self, snapshot: MarketSnapshot, *, count_below: bool = True) -> None:
         best: tuple[Decimal, Decimal] | None = None
         for strategy in self.strategies:
             preview = getattr(strategy, "preview_edge", None)
@@ -562,7 +577,9 @@ class PaperRunner:
                 best = (edge, floor)
         if best is None:
             return
-        self.stats.record_net_edge(best[0], best[1])
+        self.stats.record_net_edge(best[0], best[1], count_below=count_below)
+        if self.stats.median_net_edge_kind is None:
+            self.stats.median_net_edge_kind = "walked"
 
     def _targets(self) -> list[ScanTarget]:
         if hasattr(self.market, "list_scan_targets"):
@@ -571,6 +588,43 @@ class PaperRunner:
             ScanTarget(kind="binary", event_id=cid, question=cid, condition_ids=(cid,))
             for cid in self.market.list_condition_ids()
         ]
+
+    def _consume_screen_tape(self) -> ScreenTape | None:
+        tape = getattr(self.market, "last_screen", None)
+        return tape if isinstance(tape, ScreenTape) else None
+
+    def _ingest_screen_diagnostics(self, tape: ScreenTape | None) -> MedianEdgeKind | None:
+        """Record SCREEN counters. Booking skip stays on walk_targets only.
+
+        Prefer a complete walked diagnostic sample when every below-floor
+        book is cheap enough to walk (`N <= diag_walk_limit`). Otherwise use
+        the already-fetched raw SCREEN edges and label kind=raw.
+        """
+        if tape is None:
+            return None
+        cheap_below = len(tape.below_floor_targets) <= self.config.diag_walk_limit
+        kind: MedianEdgeKind = "walked" if cheap_below else "raw"
+        self.stats.note_screen(
+            screened_n=tape.screened_n,
+            below_floor_n=tape.below_floor_n,
+            best_binary=tape.best_binary,
+            best_set=tape.best_set,
+            kind=kind,
+        )
+        if kind == "raw":
+            self.stats.record_diagnostic_edges(tape.raw_edges, kind="raw")
+        return kind
+
+    def _walk_below_floor_diagnostics(self, tape: ScreenTape) -> None:
+        """Depth-walk below-floor markets for SUMMARY only. Never books."""
+        already = {item.event_id for item in tape.walk_targets}
+        for target in tape.below_floor_targets:
+            if target.event_id in already:
+                continue
+            snapshot = self._snapshot(target)
+            if snapshot is None:
+                continue
+            self._record_market_edge(snapshot, count_below=False)
 
     def _snapshot(self, target: ScanTarget) -> MarketSnapshot | None:
         if hasattr(self.market, "snapshot_target"):

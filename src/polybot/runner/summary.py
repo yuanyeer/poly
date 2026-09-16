@@ -6,7 +6,7 @@ from decimal import Decimal
 from statistics import median
 
 from polybot.config import PaperConfig
-from polybot.types import LedgerFill, LedgerState
+from polybot.types import LedgerFill, LedgerState, MedianEdgeKind
 
 
 def utc_now() -> datetime:
@@ -38,20 +38,49 @@ class SessionStats:
     rejected_edges: int = 0
     rejected_risk: int = 0
     snapshot_failures: int = 0
+    screened_n: int = 0
     below_floor_n: int = 0
     net_edges: list[Decimal] = field(default_factory=list)
+    best_binary: Decimal | None = None
+    best_set: Decimal | None = None
+    median_net_edge_kind: MedianEdgeKind | None = None
     _edge_day: str | None = None
 
     def reset_daily_edges(self, day_key: str) -> None:
         if self._edge_day != day_key:
             self._edge_day = day_key
+            self.screened_n = 0
             self.below_floor_n = 0
             self.net_edges = []
+            self.best_binary = None
+            self.best_set = None
+            self.median_net_edge_kind = None
 
-    def record_net_edge(self, edge: Decimal, floor: Decimal) -> None:
+    def record_net_edge(self, edge: Decimal, floor: Decimal, *, count_below: bool = True) -> None:
         self.net_edges.append(edge)
-        if edge < floor:
+        if count_below and edge < floor:
             self.below_floor_n += 1
+
+    def note_screen(
+        self,
+        *,
+        screened_n: int,
+        below_floor_n: int,
+        best_binary: Decimal | None,
+        best_set: Decimal | None,
+        kind: MedianEdgeKind,
+    ) -> None:
+        self.screened_n += screened_n
+        self.below_floor_n += below_floor_n
+        self.median_net_edge_kind = kind
+        if best_binary is not None:
+            self.best_binary = best_binary if self.best_binary is None else max(self.best_binary, best_binary)
+        if best_set is not None:
+            self.best_set = best_set if self.best_set is None else max(self.best_set, best_set)
+
+    def record_diagnostic_edges(self, edges: list[Decimal] | tuple[Decimal, ...], *, kind: MedianEdgeKind) -> None:
+        self.net_edges.extend(edges)
+        self.median_net_edge_kind = kind
 
     @property
     def median_net_edge(self) -> Decimal | None:
@@ -90,8 +119,12 @@ class DailySnapshot:
     pnl: Decimal
     open_count: int
     open_exposure: Decimal
+    screened_n: int = 0
     below_floor_n: int = 0
     median_net_edge: Decimal | None = None
+    median_net_edge_kind: MedianEdgeKind | None = None
+    best_binary: Decimal | None = None
+    best_set: Decimal | None = None
 
 
 def _fills_since(fills: list[LedgerFill], start: datetime) -> list[LedgerFill]:
@@ -118,8 +151,12 @@ def build_daily_snapshot(
     state: LedgerState,
     now: datetime | None = None,
     *,
+    screened_n: int = 0,
     below_floor_n: int = 0,
     median_net_edge: Decimal | None = None,
+    median_net_edge_kind: MedianEdgeKind | None = None,
+    best_binary: Decimal | None = None,
+    best_set: Decimal | None = None,
 ) -> DailySnapshot:
     current = now or utc_now()
     if current.tzinfo is None:
@@ -140,13 +177,21 @@ def build_daily_snapshot(
         pnl=state.equity - state.starting_balance,
         open_count=state.open_count,
         open_exposure=state.open_exposure,
+        screened_n=screened_n,
         below_floor_n=below_floor_n,
         median_net_edge=median_net_edge,
+        median_net_edge_kind=median_net_edge_kind,
+        best_binary=best_binary,
+        best_set=best_set,
     )
 
 
 def distance_to_target(state: LedgerState, target) -> Decimal:
     return Decimal(str(target)) - state.equity
+
+
+def _fmt_edge(value: Decimal | None) -> str:
+    return f"{value:.4f}" if value is not None else "n/a"
 
 
 def format_summary(
@@ -169,16 +214,18 @@ def format_summary(
     win = win_rate(window_fills)
     win_txt = f"{win:.1f}%" if win is not None else "n/a"
     dd = Decimal("0") if drawdown is None else drawdown
-    median_txt = f"{stats.median_net_edge:.4f}" if stats.median_net_edge is not None else "n/a"
+    kind_txt = stats.median_net_edge_kind or "n/a"
     acct = f" account={account_id}" if account_id else ""
     return (
         f"{label}{acct} cycles={stats.cycles} scanned={stats.scanned} "
-        f"candidates={stats.candidates} booked={stats.booked} "
+        f"candidates={stats.candidates} screened_n={stats.screened_n} booked={stats.booked} "
         f"rejected_edge={stats.rejected_edges} rejected_risk={stats.rejected_risk} "
         f"cash={state.cash:.4f} equity={state.equity:.4f} "
         f"pnl={pnl:+.4f} ({pnl_pct:+.2f}%) "
         f"distance_to_2000={distance_to_target(state, config.target_balance):.4f} "
-        f"below_floor_n={stats.below_floor_n} median_net_edge={median_txt} "
+        f"below_floor_n={stats.below_floor_n} median_net_edge={_fmt_edge(stats.median_net_edge)} "
+        f"median_net_edge_kind={kind_txt} "
+        f"best_binary={_fmt_edge(stats.best_binary)} best_set={_fmt_edge(stats.best_set)} "
         f"win_rate={win_txt} "
         f"open={state.open_count}/{config.max_concurrent_open} "
         f"exposure={state.open_exposure:.4f} target={config.target_balance} ({progress:.2f}%) "
@@ -198,7 +245,7 @@ def format_daily(
     paused: bool = False,
 ) -> str:
     win_txt = f"{snapshot.win_rate:.1f}%" if snapshot.win_rate is not None else "n/a"
-    median_txt = f"{snapshot.median_net_edge:.4f}" if snapshot.median_net_edge is not None else "n/a"
+    kind_txt = snapshot.median_net_edge_kind or "n/a"
     dd = Decimal("0") if drawdown is None else drawdown
     distance = config.target_balance - snapshot.equity
     acct = f" account={account_id}" if account_id else ""
@@ -209,7 +256,10 @@ def format_daily(
         f"locked_edge={snapshot.locked_edge:+.4f} "
         f"win_rate={win_txt} open={snapshot.open_count}/{config.max_concurrent_open} "
         f"exposure={snapshot.open_exposure:.4f} booked_notional={snapshot.booked_notional:.4f} "
-        f"below_floor_n={snapshot.below_floor_n} median_net_edge={median_txt} "
+        f"screened_n={snapshot.screened_n} below_floor_n={snapshot.below_floor_n} "
+        f"median_net_edge={_fmt_edge(snapshot.median_net_edge)} "
+        f"median_net_edge_kind={kind_txt} "
+        f"best_binary={_fmt_edge(snapshot.best_binary)} best_set={_fmt_edge(snapshot.best_set)} "
         f"dd={dd:.4f} review={int(drawdown_review)} halt={int(drawdown_halt)} "
         f"paused={int(paused)}"
     )

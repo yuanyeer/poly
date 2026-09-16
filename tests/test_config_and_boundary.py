@@ -22,6 +22,8 @@ def test_load_default_config():
     assert cfg.max_trade_notional_pct == Decimal("0.25")
     assert cfg.max_same_event_exposure_pct == Decimal("0.40")
     assert cfg.max_concurrent_open == 3
+    assert cfg.skip_walk_if_raw_below_floor is True
+    assert cfg.diag_walk_limit == 12
     assert cfg.session_enabled is False
     assert "08:00" not in Path("config/paper.yaml").read_text(encoding="utf-8")
     assert "23:00" not in Path("config/paper.yaml").read_text(encoding="utf-8")

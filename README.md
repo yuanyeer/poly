@@ -73,7 +73,7 @@ poly-paper --once
 python -m polybot --once --config config/paper.yaml --ledger data/paper_ledger.jsonl
 ```
 
-持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：按 `ledger_id` 拆分 fills、cash、equity、pnl、`distance_to_2000`、win_rate、open exposure、`below_floor_n`、`median_net_edge`、review/halt）。
+持续轮询（仍然只写本地账本，不会下真单）。默认每 20 秒一轮，日志会打出 SCAN / REJECT / BOOK，每轮还有 `SUMMARY`（会话）和 `DAILY YYYY-MM-DD`（UTC 当日：按 `ledger_id` 拆分 fills、cash、equity、pnl、`distance_to_2000`、win_rate、open exposure、`screened_n`、`below_floor_n`、`median_net_edge`、`median_net_edge_kind=raw|walked`、`best_binary` / `best_set`、review/halt）。SCREEN 扫到的市场即使因 raw-below-floor 跳过 walk / 不成交，也会进入诊断计数，避免 `scanned=0` 看起来像“什么都没扫”。
 
 **24h paper 已冻结（ops）。** 不再要求 America/New_York 08:00–23:00 时段门；默认连续 **24h** / **00:00–24:00 ET**。`config/paper.yaml` 为 `session.enabled: false`，**没有** 08:00–23:00。`booked=0` escalate 按**日历连续 24h** 计（已无 off-hours）。~~Copy 账本可连续扫描以镜像全日领单（优先 `x-MoneyForWhiskas`）。~~ Copy 账本与观察名单 **paused**，直到金融重新开放该类型。赛跑只跑 **`main_arb`**：10% 或权益低于 **900** 打 `REVIEW`（上报 finance，**不停扫**）；25% 或权益低于 **750** 才 `SKIP drawdown_halt`。900 不是硬停地板。
 

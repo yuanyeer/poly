@@ -25,6 +25,9 @@ scan:
   summary_every_cycles: 1
   # Screen many books with batch asks; only walk when 1-Σbest_ask can clear the floor.
   skip_walk_if_raw_below_floor: true
+  # Diagnostics only. Walk every below-floor book when N <= this; otherwise
+  # SUMMARY uses raw SCREEN edges (median_net_edge_kind=raw). Never books below floor.
+  diag_walk_limit: 12
   # Optional explicit condition IDs. Empty = discover via CLOB/Gamma.
   condition_ids: []
 

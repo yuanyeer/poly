@@ -5,7 +5,7 @@ import logging
 from decimal import Decimal
 from typing import Any, Iterable
 
-from polybot.types import ScanTarget
+from polybot.types import ScanTarget, ScreenTape
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +189,46 @@ def select_walkable(
         if target.raw_edge is not None and target.raw_edge >= floor
     ]
     return hits[:limit]
+
+
+def build_screen_tape(
+    binaries: list[ScanTarget],
+    groups: list[ScanTarget],
+    *,
+    floor: Decimal,
+    walk_binary_limit: int,
+    walk_group_limit: int,
+    skip_below_floor: bool,
+) -> ScreenTape:
+    """Ranked SCREEN universe plus booking-only walk list.
+
+    Booking skip is unchanged: `walk_targets` still omit raw-below-floor
+    when `skip_below_floor` is set. Diagnostics use `raw_edges` /
+    `below_floor_targets` separately.
+    """
+    walk_binaries = select_walkable(
+        binaries,
+        floor,
+        limit=walk_binary_limit,
+        skip_below_floor=skip_below_floor,
+    )
+    walk_groups = select_walkable(
+        groups,
+        floor,
+        limit=walk_group_limit,
+        skip_below_floor=skip_below_floor,
+    )
+    scored = [item for item in binaries + groups if item.raw_edge is not None]
+    below = [item for item in scored if item.raw_edge is not None and item.raw_edge < floor]
+    return ScreenTape(
+        screened_n=len(binaries) + len(groups),
+        below_floor_n=len(below),
+        best_binary=binaries[0].raw_edge if binaries else None,
+        best_set=groups[0].raw_edge if groups else None,
+        raw_edges=tuple(item.raw_edge for item in scored if item.raw_edge is not None),
+        walk_targets=tuple(walk_binaries + walk_groups),
+        below_floor_targets=tuple(below),
+    )
 
 
 def binary_targets(condition_ids: Iterable[str], questions: dict[str, str] | None = None) -> list[ScanTarget]:

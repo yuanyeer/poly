@@ -63,6 +63,9 @@ class MarketSnapshot:
     kind: str = "binary"
 
 
+MedianEdgeKind = Literal["raw", "walked"]
+
+
 @dataclass(frozen=True)
 class ScanTarget:
     """A binary condition or a multi-market complete-set bundle."""
@@ -73,6 +76,19 @@ class ScanTarget:
     condition_ids: tuple[str, ...]
     token_ids: tuple[str, ...] = ()
     raw_edge: Decimal | None = None
+
+
+@dataclass(frozen=True)
+class ScreenTape:
+    """SCREEN universe. Booking still uses `walk_targets` only."""
+
+    screened_n: int
+    below_floor_n: int
+    best_binary: Decimal | None
+    best_set: Decimal | None
+    raw_edges: tuple[Decimal, ...]
+    walk_targets: tuple[ScanTarget, ...]
+    below_floor_targets: tuple[ScanTarget, ...]
 
 
 @dataclass(frozen=True)

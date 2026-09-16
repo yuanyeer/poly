@@ -210,6 +210,10 @@ def test_summary_and_daily_include_distance_to_2000_and_rank():
     assert "account=arb-main" in summary
     assert "distance_to_2000=1000.0000" in summary
     assert "below_floor_n=0" in summary
+    assert "screened_n=0" in summary
+    assert "median_net_edge_kind=n/a" in summary
+    assert "best_binary=n/a" in summary
+    assert "best_set=n/a" in summary
     snap = DailySnapshot(
         date="2026-09-16",
         fills=0,
