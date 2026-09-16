@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import yaml
+from dotenv import load_dotenv
+
+from polybot import (
+    MAKER_EDGE_FLOOR,
+    MAX_CONCURRENT_OPEN,
+    MAX_SAME_EVENT_EXPOSURE_PCT,
+    MAX_TRADE_NOTIONAL_PCT,
+    PAPER_MODE,
+    STARTING_BALANCE_USD,
+    TAKER_EDGE_FLOOR,
+    TARGET_BALANCE_USD,
+)
+
+
+class ConfigError(ValueError):
+    """Invalid or loosened paper-mode configuration."""
+
+
+@dataclass(frozen=True)
+class PaperConfig:
+    mode: str
+    starting_balance: Decimal
+    target_balance: Decimal
+    ledger_path: Path
+    clob_host: str
+    gamma_host: str
+    chain_id: int
+    max_markets: int
+    poll_interval_seconds: float
+    condition_ids: tuple[str, ...]
+    taker_edge_floor: Decimal
+    maker_edge_floor: Decimal
+    max_trade_notional_pct: Decimal
+    max_same_event_exposure_pct: Decimal
+    max_concurrent_open: int
+    max_unhedged_inventory: Decimal
+    assume_taker_only_if_fd_missing: bool
+    min_fill_size: Decimal
+
+
+def _d(value: Any) -> Decimal:
+    return Decimal(str(value))
+
+
+def _require_mode(raw: dict[str, Any]) -> None:
+    mode = str(raw.get("mode", "")).strip().lower()
+    if mode != PAPER_MODE:
+        raise ConfigError(
+            f"only mode={PAPER_MODE!r} is supported; live/real-money paths are not implemented"
+        )
+
+
+def _enforce_floors(cfg: PaperConfig) -> None:
+    if cfg.starting_balance != _d(STARTING_BALANCE_USD):
+        raise ConfigError(
+            f"starting_balance must be {STARTING_BALANCE_USD} USD (got {cfg.starting_balance})"
+        )
+    if cfg.target_balance != _d(TARGET_BALANCE_USD):
+        raise ConfigError(
+            f"target_balance is a report-only milestone and must stay {TARGET_BALANCE_USD}"
+        )
+    if cfg.taker_edge_floor < _d(TAKER_EDGE_FLOOR):
+        raise ConfigError(f"taker_edge_floor cannot be below {TAKER_EDGE_FLOOR}")
+    if cfg.maker_edge_floor < _d(MAKER_EDGE_FLOOR):
+        raise ConfigError(f"maker_edge_floor cannot be below {MAKER_EDGE_FLOOR}")
+    if cfg.max_trade_notional_pct > _d(MAX_TRADE_NOTIONAL_PCT):
+        raise ConfigError(f"max_trade_notional_pct cannot exceed {MAX_TRADE_NOTIONAL_PCT}")
+    if cfg.max_same_event_exposure_pct > _d(MAX_SAME_EVENT_EXPOSURE_PCT):
+        raise ConfigError(
+            f"max_same_event_exposure_pct cannot exceed {MAX_SAME_EVENT_EXPOSURE_PCT}"
+        )
+    if cfg.max_concurrent_open > MAX_CONCURRENT_OPEN:
+        raise ConfigError(f"max_concurrent_open cannot exceed {MAX_CONCURRENT_OPEN}")
+    if cfg.max_unhedged_inventory < 0:
+        raise ConfigError("max_unhedged_inventory cannot be negative")
+
+
+def load_config(path: str | Path | None = None) -> PaperConfig:
+    load_dotenv(override=False)
+    config_path = Path(path or os.environ.get("POLY_CONFIG") or "config/paper.yaml")
+    if not config_path.is_file():
+        raise ConfigError(f"config file not found: {config_path}")
+
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ConfigError("config root must be a mapping")
+    _require_mode(raw)
+
+    ledger = raw.get("ledger") or {}
+    endpoints = raw.get("endpoints") or {}
+    scan = raw.get("scan") or {}
+    edge = raw.get("edge") or {}
+    risk = raw.get("risk") or {}
+    fees = raw.get("fees") or {}
+
+    ledger_path = Path(os.environ.get("POLY_LEDGER_PATH") or ledger.get("path") or "data/paper_ledger.jsonl")
+    clob_host = os.environ.get("POLY_CLOB_HOST") or endpoints.get("clob_host") or "https://clob.polymarket.com"
+    gamma_host = os.environ.get("POLY_GAMMA_HOST") or endpoints.get("gamma_host") or "https://gamma-api.polymarket.com"
+    chain_id = int(os.environ.get("POLY_CHAIN_ID") or endpoints.get("chain_id") or 137)
+
+    cfg = PaperConfig(
+        mode=PAPER_MODE,
+        starting_balance=_d(ledger.get("starting_balance_usd", STARTING_BALANCE_USD)),
+        target_balance=_d(ledger.get("target_balance_usd", TARGET_BALANCE_USD)),
+        ledger_path=ledger_path,
+        clob_host=str(clob_host).rstrip("/"),
+        gamma_host=str(gamma_host).rstrip("/"),
+        chain_id=chain_id,
+        max_markets=int(scan.get("max_markets", 12)),
+        poll_interval_seconds=float(scan.get("poll_interval_seconds", 15)),
+        condition_ids=tuple(str(x) for x in (scan.get("condition_ids") or []) if x),
+        taker_edge_floor=_d(edge.get("taker_floor", TAKER_EDGE_FLOOR)),
+        maker_edge_floor=_d(edge.get("maker_floor", MAKER_EDGE_FLOOR)),
+        max_trade_notional_pct=_d(risk.get("max_trade_notional_pct", MAX_TRADE_NOTIONAL_PCT)),
+        max_same_event_exposure_pct=_d(
+            risk.get("max_same_event_exposure_pct", MAX_SAME_EVENT_EXPOSURE_PCT)
+        ),
+        max_concurrent_open=int(risk.get("max_concurrent_open", MAX_CONCURRENT_OPEN)),
+        max_unhedged_inventory=_d(risk.get("max_unhedged_inventory_usd", 0)),
+        assume_taker_only_if_fd_missing=bool(fees.get("assume_taker_only_if_fd_missing", True)),
+        min_fill_size=_d(raw.get("min_fill_size", 1)),
+    )
+    _enforce_floors(cfg)
+    return cfg

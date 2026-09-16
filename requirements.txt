@@ -1,0 +1,5 @@
+# Pinned runtime deps. Prefer `pip install -e .` (see pyproject.toml).
+py-clob-client-v2==1.1.0
+PyYAML==6.0.2
+python-dotenv==1.1.1
+httpx==0.28.1
