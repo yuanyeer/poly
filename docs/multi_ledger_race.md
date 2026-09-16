@@ -54,8 +54,9 @@ unchanged.
 
 ## Reporting
 `SUMMARY` / `DAILY` must split by account / ledger_id: cash, equity, PnL,
-`distance_to_2000`, `below_floor_n`, `median_net_edge`, review/halt flags,
-plus `RANK` / `WINNER` (report only; no fabricated fills).
+`distance_to_2000`, `screened_n`, `below_floor_n`, `median_net_edge`,
+`median_net_edge_kind=raw|walked`, `best_binary` / `best_set`, review/halt
+flags, plus `RANK` / `WINNER` (report only; no fabricated fills).
 
 While copy is DISABLED, the only racing account is **`main_arb`**. Historical
 `copy-*` files may exist on disk; they are **not** in the race.

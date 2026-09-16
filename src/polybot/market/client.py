@@ -10,15 +10,15 @@ from py_clob_client_v2 import ClobClient
 from polybot.config import PaperConfig
 from polybot.market.discover import (
     binary_targets,
+    build_screen_tape,
     complete_set_targets_from_gamma_events,
     gamma_binary_targets,
     live_binary_target,
     paginate_clob_rows,
     parse_ask_map,
     rank_targets_by_raw_edge,
-    select_walkable,
 )
-from polybot.types import BookLevel, FeeSchedule, MarketSnapshot, OutcomeBook, ScanTarget
+from polybot.types import BookLevel, FeeSchedule, MarketSnapshot, OutcomeBook, ScanTarget, ScreenTape
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,7 @@ class PaperMarketClient:
         self._clob = clob or ClobClient(host=config.clob_host, chain_id=config.chain_id)
         if getattr(self._clob, "signer", None) is not None or getattr(self._clob, "creds", None) is not None:
             raise LiveOrderForbidden("paper mode must use an L0 read-only ClobClient (no key/creds)")
+        self.last_screen: ScreenTape | None = None
 
     def __getattr__(self, name: str) -> Any:
         if name in LIVE_ORDER_METHODS:
@@ -116,6 +117,7 @@ class PaperMarketClient:
 
     def list_scan_targets(self) -> list[ScanTarget]:
         if self.config.condition_ids:
+            self.last_screen = None
             return binary_targets(self.config.condition_ids)[: self.config.max_markets]
 
         binaries = self._live_binaries()
@@ -129,32 +131,27 @@ class PaperMarketClient:
         asks = self._batch_asks([token for target in binaries + groups for token in target.token_ids])
         binaries = rank_targets_by_raw_edge(binaries, asks)
         groups = rank_targets_by_raw_edge(groups, asks)
-        walk_binaries = select_walkable(
+        tape = build_screen_tape(
             binaries,
-            self.config.taker_edge_floor,
-            limit=self.config.max_markets,
-            skip_below_floor=self.config.skip_walk_if_raw_below_floor,
-        )
-        walk_groups = select_walkable(
             groups,
-            self.config.taker_edge_floor,
-            limit=self.config.max_complete_set_events,
+            floor=self.config.taker_edge_floor,
+            walk_binary_limit=self.config.max_markets,
+            walk_group_limit=self.config.max_complete_set_events,
             skip_below_floor=self.config.skip_walk_if_raw_below_floor,
         )
-        best_bin = binaries[0].raw_edge if binaries else None
-        best_grp = groups[0].raw_edge if groups else None
+        self.last_screen = tape
         logger.info(
             "SCREEN binaries=%s complete_sets=%s taker_hits=%s/%s best_binary=%s best_set=%s walking=%s+%s",
             len(binaries),
             len(groups),
             sum(1 for item in binaries if item.raw_edge is not None and item.raw_edge >= self.config.taker_edge_floor),
             sum(1 for item in groups if item.raw_edge is not None and item.raw_edge >= self.config.taker_edge_floor),
-            best_bin,
-            best_grp,
-            len(walk_binaries),
-            len(walk_groups),
+            tape.best_binary,
+            tape.best_set,
+            sum(1 for item in tape.walk_targets if item.kind == "binary"),
+            sum(1 for item in tape.walk_targets if item.kind == "complete_set"),
         )
-        return walk_binaries + walk_groups
+        return list(tape.walk_targets)
 
     def _live_binaries(self) -> list[ScanTarget]:
         rows = self._from_clob_rows("get_sampling_markets")

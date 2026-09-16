@@ -168,8 +168,13 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 - `cash`, `equity`, `PnL`
 - `distance_to_2000` (race on **`main_arb` only**; first to **2000 USD** wins)
-- `below_floor_n`: count of scanned markets whose best post-fee + depth-walk per-share net edge is below the applicable floor (still counted).
-- `median_net_edge`: median of those same per-share net edges, **including** below-floor prints.
+- `screened_n`: SCREEN universe size this UTC day (binaries + complete-sets). Must stay visible when booking skip leaves `scanned=0`.
+- `below_floor_n`: count of screened markets whose diagnostic net edge is below the applicable floor (still counted). Universe count, including skip-walk prints.
+- `median_net_edge`: median of the diagnostic sample, **including** below-floor / negative prints.
+- `median_net_edge_kind=raw|walked`: `walked` when every below-floor book was cheap enough to depth-walk for diagnostics only; otherwise `raw` (batch best-ask `1−Σask`, no fee). Booking never uses raw to lower floors or book below-floor.
+- `best_binary` / `best_set`: best SCREEN raw edges seen this UTC day (`n/a` if none).
 - review / halt flags for that ledger
+
+Booking path is unchanged: `skip_walk_if_raw_below_floor` still omits below-floor books from the walk/book list. Diagnostic walks never book.
 
 UTC day window for fills; edge tape resets on UTC date rollover.

@@ -85,6 +85,9 @@ class PaperConfig:
     size_probe_steps: int = 8
     summary_every_cycles: int = 1
     skip_walk_if_raw_below_floor: bool = True
+    # Diagnostics-only: walk all below-floor books when N <= this; else use raw SCREEN edges.
+    # Never books below-floor. Does not change skip_walk_if_raw_below_floor or edge floors.
+    diag_walk_limit: int = 12
     # 24h / 00:00–24:00 ET. Gate off; unused start/end are not an 08:00–23:00 window.
     session_enabled: bool = False
     session_timezone: str = "America/New_York"
@@ -352,6 +355,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         size_probe_steps=max(3, int(scan.get("size_probe_steps", 8))),
         summary_every_cycles=max(1, int(scan.get("summary_every_cycles", 1))),
         skip_walk_if_raw_below_floor=bool(scan.get("skip_walk_if_raw_below_floor", True)),
+        diag_walk_limit=max(0, int(scan.get("diag_walk_limit", 12))),
         session_enabled=bool(session.get("enabled", False)),
         session_timezone=str(session.get("timezone") or "America/New_York"),
         session_start=str(session.get("start") or "00:00"),

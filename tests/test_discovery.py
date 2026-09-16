@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from polybot.market.discover import (
     binary_targets,
+    build_screen_tape,
     complete_set_targets_from_gamma_events,
     gamma_binary_ids,
     live_binary_target,
@@ -131,3 +132,35 @@ def test_rank_and_select_walkable_skips_raw_below_floor():
     assert ranked[0].raw_edge == Decimal("0.20")
     walk = select_walkable(ranked, Decimal("0.005"), limit=10, skip_below_floor=True)
     assert [item.event_id for item in walk] == ["cheap"]
+
+
+def test_build_screen_tape_keeps_booking_skip_and_counts_below_floor():
+    asks = parse_ask_map(
+        {
+            "y1": {"SELL": "0.40"},
+            "n1": "0.40",
+            "y2": {"SELL": "0.52"},
+            "n2": "0.52",
+            "y3": {"SELL": "0.60"},
+            "n3": "0.60",
+        }
+    )
+    cheap = ScanTarget("binary", "cheap", "cheap", ("cheap",), ("y1", "n1"))
+    mid = ScanTarget("binary", "mid", "mid", ("mid",), ("y2", "n2"))
+    rich = ScanTarget("binary", "rich", "rich", ("rich",), ("y3", "n3"))
+    ranked = rank_targets_by_raw_edge([cheap, mid, rich], asks)
+    tape = build_screen_tape(
+        ranked,
+        [],
+        floor=Decimal("0.005"),
+        walk_binary_limit=10,
+        walk_group_limit=0,
+        skip_below_floor=True,
+    )
+    assert tape.screened_n == 3
+    assert tape.below_floor_n == 2
+    assert [item.event_id for item in tape.walk_targets] == ["cheap"]
+    assert {item.event_id for item in tape.below_floor_targets} == {"mid", "rich"}
+    assert tape.best_binary == Decimal("0.20")
+    assert tape.best_set is None
+    assert sorted(tape.raw_edges) == [Decimal("-0.20"), Decimal("-0.04"), Decimal("0.20")]
