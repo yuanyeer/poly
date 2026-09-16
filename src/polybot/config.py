@@ -45,6 +45,12 @@ class PaperConfig:
     max_unhedged_inventory: Decimal
     assume_taker_only_if_fd_missing: bool
     min_fill_size: Decimal
+    clob_pages: int = 2
+    include_gamma: bool = True
+    max_complete_set_events: int = 10
+    max_complete_set_outcomes: int = 12
+    size_probe_steps: int = 8
+    summary_every_cycles: int = 1
 
 
 def _d(value: Any) -> Decimal:
@@ -115,8 +121,8 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         clob_host=str(clob_host).rstrip("/"),
         gamma_host=str(gamma_host).rstrip("/"),
         chain_id=chain_id,
-        max_markets=int(scan.get("max_markets", 12)),
-        poll_interval_seconds=float(scan.get("poll_interval_seconds", 15)),
+        max_markets=int(scan.get("max_markets", 36)),
+        poll_interval_seconds=float(scan.get("poll_interval_seconds", 20)),
         condition_ids=tuple(str(x) for x in (scan.get("condition_ids") or []) if x),
         taker_edge_floor=_d(edge.get("taker_floor", TAKER_EDGE_FLOOR)),
         maker_edge_floor=_d(edge.get("maker_floor", MAKER_EDGE_FLOOR)),
@@ -128,6 +134,14 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         max_unhedged_inventory=_d(risk.get("max_unhedged_inventory_usd", 0)),
         assume_taker_only_if_fd_missing=bool(fees.get("assume_taker_only_if_fd_missing", True)),
         min_fill_size=_d(raw.get("min_fill_size", 1)),
+        clob_pages=max(1, int(scan.get("clob_pages", 2))),
+        include_gamma=bool(scan.get("include_gamma", True)),
+        max_complete_set_events=max(0, int(scan.get("max_complete_set_events", 10))),
+        max_complete_set_outcomes=max(3, int(scan.get("max_complete_set_outcomes", 12))),
+        size_probe_steps=max(3, int(scan.get("size_probe_steps", 8))),
+        summary_every_cycles=max(1, int(scan.get("summary_every_cycles", 1))),
     )
     _enforce_floors(cfg)
+    if cfg.poll_interval_seconds < 5:
+        raise ConfigError("poll_interval_seconds must be >= 5 for sane CLOB polling")
     return cfg
