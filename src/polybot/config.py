@@ -10,6 +10,10 @@ import yaml
 from dotenv import load_dotenv
 
 from polybot import (
+    COPY_MAX_CHASE_SLIPPAGE,
+    COPY_MAX_SLEEVE_PCT,
+    COPY_STOP_PATH_DD,
+    COPY_STOP_PEAK_DD,
     MAKER_EDGE_FLOOR,
     MAX_CONCURRENT_OPEN,
     MAX_SAME_EVENT_EXPOSURE_PCT,
@@ -23,6 +27,33 @@ from polybot import (
 
 class ConfigError(ValueError):
     """Invalid or loosened paper-mode configuration."""
+
+
+@dataclass(frozen=True)
+class CopyLeaderConfig:
+    """Watchlist row. `id` is the display-name key until wallet mapping exists."""
+
+    id: str
+    label: str
+    strategy_tag: str
+    priority: int = 100
+    primary: bool = False
+    wallet: str | None = None
+
+
+@dataclass(frozen=True)
+class CopyConfig:
+    """Paper-only copy-trading observation. No live orders."""
+
+    enabled: bool = False
+    max_sleeve_pct: Decimal = Decimal(COPY_MAX_SLEEVE_PCT)
+    stop_peak_dd: Decimal = Decimal(COPY_STOP_PEAK_DD)
+    stop_path_dd: Decimal = Decimal(COPY_STOP_PATH_DD)
+    month_pnl_below: Decimal = Decimal("0")
+    max_chase_slippage: Decimal = Decimal(COPY_MAX_CHASE_SLIPPAGE)
+    leaders: tuple[CopyLeaderConfig, ...] = ()
+    metrics_stub: Path | None = None
+    source_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -69,6 +100,7 @@ class PaperConfig:
     drawdown_review_floor_usd: Decimal = Decimal("180")
     drawdown_halt_pct: Decimal = Decimal("0.25")
     drawdown_halt_floor_usd: Decimal = Decimal("150")
+    copy: CopyConfig | None = None
 
 
 def _d(value: Any) -> Decimal:
@@ -150,6 +182,121 @@ def _enforce_floors(cfg: PaperConfig) -> None:
     if cfg.drawdown_halt_floor_usd >= cfg.drawdown_review_floor_usd:
         raise ConfigError("drawdown_halt_floor_usd must be below drawdown_review_floor_usd (180 is review-only)")
     _enforce_session(cfg)
+    if cfg.copy is not None:
+        _enforce_copy(cfg.copy)
+
+
+def _enforce_copy(copy: CopyConfig) -> None:
+    if copy.max_sleeve_pct <= 0 or copy.max_sleeve_pct > _d(COPY_MAX_SLEEVE_PCT):
+        raise ConfigError(f"copy max_sleeve_pct cannot exceed {COPY_MAX_SLEEVE_PCT}")
+    if copy.stop_peak_dd <= 0 or copy.stop_peak_dd > _d(COPY_STOP_PEAK_DD):
+        raise ConfigError(f"copy stop peak_dd cannot exceed {COPY_STOP_PEAK_DD} (loosening forbidden)")
+    if copy.stop_path_dd <= 0 or copy.stop_path_dd > _d(COPY_STOP_PATH_DD):
+        raise ConfigError(f"copy stop path_dd cannot exceed {COPY_STOP_PATH_DD} (loosening forbidden)")
+    if copy.month_pnl_below < 0:
+        raise ConfigError("copy month_pnl_below cannot be negative (would loosen stop-follow)")
+    if copy.max_chase_slippage <= 0 or copy.max_chase_slippage > _d(COPY_MAX_CHASE_SLIPPAGE):
+        raise ConfigError(
+            f"copy max_chase_slippage cannot exceed {COPY_MAX_CHASE_SLIPPAGE} (1¢; loosening forbidden)"
+        )
+    ids = [leader.id for leader in copy.leaders]
+    if any(not leader_id.strip() for leader_id in ids):
+        raise ConfigError("copy leader id is required")
+    if len(ids) != len(set(ids)):
+        raise ConfigError("copy leader ids must be unique")
+    for leader in copy.leaders:
+        if not leader.label.strip():
+            raise ConfigError(f"copy leader {leader.id!r} needs a label")
+        if not leader.strategy_tag.strip():
+            raise ConfigError(f"copy leader {leader.id!r} needs a strategy_tag")
+        if leader.priority < 1:
+            raise ConfigError(f"copy leader {leader.id!r} priority must be >= 1")
+
+
+def _resolve_copy_path(raw_path: str, paper_path: Path) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_file():
+        return candidate
+    search = [
+        Path.cwd() / candidate,
+        paper_path.parent / candidate,
+        paper_path.parent / candidate.name,
+    ]
+    for path in search:
+        if path.is_file():
+            return path
+    raise ConfigError(f"copy config not found: {raw_path}")
+
+
+def _parse_leaders(raw: Any) -> tuple[CopyLeaderConfig, ...]:
+    if not raw:
+        return ()
+    if not isinstance(raw, list):
+        raise ConfigError("copy leaders must be a list")
+    leaders: list[CopyLeaderConfig] = []
+    for index, row in enumerate(raw):
+        if not isinstance(row, dict):
+            raise ConfigError(f"copy leader #{index} must be a mapping")
+        raw_id = row.get("id") if row.get("id") not in (None, "") else row.get("name")
+        if isinstance(raw_id, (int, float)):
+            raise ConfigError(
+                "copy leader id was parsed as a number; quote 0x… / numeric keys in YAML"
+            )
+        leader_id = str(raw_id or "").strip()
+        label = str(row.get("label") or leader_id).strip()
+        tag = str(row.get("strategy_tag") or row.get("tag") or "").strip()
+        wallet_raw = row.get("wallet")
+        wallet = str(wallet_raw).strip() if wallet_raw else None
+        leaders.append(
+            CopyLeaderConfig(
+                id=leader_id,
+                label=label,
+                strategy_tag=tag,
+                priority=int(row.get("priority") or index + 1),
+                primary=bool(row.get("primary", False)),
+                wallet=wallet or None,
+            )
+        )
+    return tuple(sorted(leaders, key=lambda item: item.priority))
+
+
+def parse_copy_config(raw: dict[str, Any], *, source_path: Path | None = None) -> CopyConfig:
+    stop = raw.get("stop_follow") or {}
+    if not isinstance(stop, dict):
+        raise ConfigError("copy stop_follow must be a mapping")
+    stub_raw = raw.get("metrics_stub")
+    stub = Path(str(stub_raw)) if stub_raw else None
+    return CopyConfig(
+        enabled=bool(raw.get("enabled", True)),
+        max_sleeve_pct=_d(raw.get("max_sleeve_pct", COPY_MAX_SLEEVE_PCT)),
+        stop_peak_dd=_d(stop.get("peak_dd", COPY_STOP_PEAK_DD)),
+        stop_path_dd=_d(stop.get("path_dd", COPY_STOP_PATH_DD)),
+        month_pnl_below=_d(stop.get("month_pnl_below", "0")),
+        max_chase_slippage=_d(raw.get("max_chase_slippage", COPY_MAX_CHASE_SLIPPAGE)),
+        leaders=_parse_leaders(raw.get("leaders")),
+        metrics_stub=stub,
+        source_path=source_path,
+    )
+
+
+def _load_copy(raw: dict[str, Any], paper_path: Path) -> CopyConfig | None:
+    section = raw.get("copy")
+    if not section:
+        return None
+    if not isinstance(section, dict):
+        raise ConfigError("copy must be a mapping")
+    nested = dict(section)
+    source = paper_path
+    if nested.get("path"):
+        source = _resolve_copy_path(str(nested["path"]), paper_path)
+        loaded = yaml.safe_load(source.read_text(encoding="utf-8")) or {}
+        if not isinstance(loaded, dict):
+            raise ConfigError("copy config root must be a mapping")
+        enabled_override = nested["enabled"] if "enabled" in nested else None
+        nested = loaded
+        if enabled_override is not None:
+            nested["enabled"] = enabled_override
+    return parse_copy_config(nested, source_path=source)
 
 
 def load_config(path: str | Path | None = None) -> PaperConfig:
@@ -213,6 +360,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         drawdown_review_floor_usd=_d(session.get("drawdown_review_floor_usd", "180")),
         drawdown_halt_pct=_d(session.get("drawdown_halt_pct", "0.25")),
         drawdown_halt_floor_usd=_d(session.get("drawdown_halt_floor_usd", "150")),
+        copy=_load_copy(raw, config_path),
     )
     _enforce_floors(cfg)
     if cfg.poll_interval_seconds < 5:
