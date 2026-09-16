@@ -95,6 +95,27 @@ def test_daily_snapshot_uses_utc_day_window_only():
     assert "fills=1" in line
     assert "win_rate=100.0%" in line
     assert "exposure=12.0000" in line
+    assert "below_floor_n=0" in line
+    assert "median_net_edge=n/a" in line
+
+
+def test_daily_line_includes_below_floor_and_median():
+    cfg = paper_config()
+    state = LedgerState(
+        starting_balance=Decimal("200"),
+        cash=Decimal("200"),
+        locked_payout=Decimal("0"),
+        open_count=0,
+    )
+    snap = build_daily_snapshot(
+        state,
+        datetime(2026, 9, 16, 15, 0, tzinfo=timezone.utc),
+        below_floor_n=7,
+        median_net_edge=Decimal("-0.0140"),
+    )
+    line = format_daily(snap, cfg)
+    assert "below_floor_n=7" in line
+    assert "median_net_edge=-0.0140" in line
 
 
 class _StubMarket:
@@ -127,4 +148,23 @@ def test_loop_runs_multiple_cycles(tmp_path):
     assert "cash=" in report.daily_summary
     assert "win_rate=" in report.daily_summary
     assert "exposure=" in report.daily_summary
+    assert "below_floor_n=" in report.daily_summary
+    assert "median_net_edge=" in report.daily_summary
     assert report.rejected_edges >= 1
+
+
+def test_daily_counts_below_floor_net_edges(tmp_path):
+    cfg = paper_config(tmp_path)
+    market = binary_market(
+        yes_asks=[level("0.52", "10")],
+        no_asks=[level("0.52", "10")],
+    )
+    stub = _StubMarket(market)
+    runner = PaperRunner(cfg, ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance), market=stub)  # type: ignore[arg-type]
+    report = runner.run_cycle()
+    assert report.booked == 0
+    assert "below_floor_n=1" in report.daily_summary
+    assert "median_net_edge=n/a" not in report.daily_summary
+    assert runner.stats.below_floor_n == 1
+    assert runner.stats.median_net_edge is not None
+    assert runner.stats.median_net_edge < cfg.taker_edge_floor

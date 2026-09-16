@@ -51,10 +51,54 @@ class PaperConfig:
     max_complete_set_outcomes: int = 12
     size_probe_steps: int = 8
     summary_every_cycles: int = 1
+    skip_walk_if_raw_below_floor: bool = True
+    # FINAL default from poly 负责人: America/New_York 09:00–22:00 local (DST).
+    # Not 24h. Outside the window the loop must not scan.
+    session_enabled: bool = True
+    session_timezone: str = "America/New_York"
+    session_start: str = "09:00"
+    session_end: str = "22:00"
+    # booked=0 streak counts only in-window cycles (not wall-clock 24h).
+    # Overnight idle between end and next start does not increment it.
+    # ~two in-window sessions of booked=0 trips TRIGGER idle_zero_fill.
+    idle_zero_fill_sessions: int = 2
+    # Live ledger equity vs peak, every cycle including off-hours.
+    drawdown_halt_pct: Decimal = Decimal("0.25")
+    # Ops hard floor from the merged docs note (PR #3).
+    drawdown_hard_floor_usd: Decimal = Decimal("180")
 
 
 def _d(value: Any) -> Decimal:
     return Decimal(str(value))
+
+
+def _parse_hhmm(value: Any) -> None:
+    text = str(value).strip()
+    parts = text.split(":")
+    if len(parts) != 2:
+        raise ConfigError(f"session time must be HH:MM (got {value!r})")
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1])
+    except ValueError as exc:
+        raise ConfigError(f"session time must be HH:MM (got {value!r})") from exc
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        raise ConfigError(f"session time out of range: {value!r}")
+
+
+def _enforce_session(cfg: PaperConfig) -> None:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        ZoneInfo(cfg.session_timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ConfigError(f"unknown session timezone: {cfg.session_timezone!r}") from exc
+    _parse_hhmm(cfg.session_start)
+    _parse_hhmm(cfg.session_end)
+    start = tuple(int(x) for x in cfg.session_start.split(":"))
+    end = tuple(int(x) for x in cfg.session_end.split(":"))
+    if cfg.session_enabled and start >= end:
+        raise ConfigError("session window must be a same-day interval (start < end); 24h trading is disabled")
 
 
 def _require_mode(raw: dict[str, Any]) -> None:
@@ -88,6 +132,13 @@ def _enforce_floors(cfg: PaperConfig) -> None:
         raise ConfigError(f"max_concurrent_open cannot exceed {MAX_CONCURRENT_OPEN}")
     if cfg.max_unhedged_inventory < 0:
         raise ConfigError("max_unhedged_inventory cannot be negative")
+    if cfg.idle_zero_fill_sessions < 1:
+        raise ConfigError("idle_zero_fill_sessions must be >= 1")
+    if cfg.drawdown_halt_pct <= 0 or cfg.drawdown_halt_pct > 1:
+        raise ConfigError("drawdown_halt_pct must be in (0, 1]")
+    if cfg.drawdown_hard_floor_usd <= 0:
+        raise ConfigError("drawdown_hard_floor_usd must be > 0")
+    _enforce_session(cfg)
 
 
 def load_config(path: str | Path | None = None) -> PaperConfig:
@@ -107,6 +158,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
     edge = raw.get("edge") or {}
     risk = raw.get("risk") or {}
     fees = raw.get("fees") or {}
+    session = raw.get("session") or {}
 
     ledger_path = Path(os.environ.get("POLY_LEDGER_PATH") or ledger.get("path") or "data/paper_ledger.jsonl")
     clob_host = os.environ.get("POLY_CLOB_HOST") or endpoints.get("clob_host") or "https://clob.polymarket.com"
@@ -134,12 +186,20 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         max_unhedged_inventory=_d(risk.get("max_unhedged_inventory_usd", 0)),
         assume_taker_only_if_fd_missing=bool(fees.get("assume_taker_only_if_fd_missing", True)),
         min_fill_size=_d(raw.get("min_fill_size", 1)),
-        clob_pages=max(1, int(scan.get("clob_pages", 2))),
+        clob_pages=max(1, int(scan.get("clob_pages", 3))),
         include_gamma=bool(scan.get("include_gamma", True)),
         max_complete_set_events=max(0, int(scan.get("max_complete_set_events", 10))),
         max_complete_set_outcomes=max(3, int(scan.get("max_complete_set_outcomes", 12))),
         size_probe_steps=max(3, int(scan.get("size_probe_steps", 8))),
         summary_every_cycles=max(1, int(scan.get("summary_every_cycles", 1))),
+        skip_walk_if_raw_below_floor=bool(scan.get("skip_walk_if_raw_below_floor", True)),
+        session_enabled=bool(session.get("enabled", True)),
+        session_timezone=str(session.get("timezone") or "America/New_York"),
+        session_start=str(session.get("start") or "09:00"),
+        session_end=str(session.get("end") or "22:00"),
+        idle_zero_fill_sessions=max(1, int(session.get("idle_zero_fill_sessions", 2))),
+        drawdown_halt_pct=_d(session.get("drawdown_halt_pct", "0.25")),
+        drawdown_hard_floor_usd=_d(session.get("drawdown_hard_floor_usd", "180")),
     )
     _enforce_floors(cfg)
     if cfg.poll_interval_seconds < 5:

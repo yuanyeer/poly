@@ -105,4 +105,22 @@ Paper-only operational stop/review notes. They do **not** change edge floors, fe
 
 2. **连续 24h booked=0** — Meter **cumulative time inside this trading window only**. Off-hours (scanner stopped / outside NY 09:00–22:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
 
-3. **Drawdown** — Live, real time: compare current paper ledger balance vs peak, with a hard floor of **180** USD. This trigger does **not** pause outside the trading window.
+3. **Drawdown** — Live, real time: compare current paper ledger balance vs peak, with a hard floor of **180** USD. This trigger does **not** pause outside the trading window. The runner also halts scanning when live equity is `drawdown_halt_pct` (default 25%) below peak.
+
+## Trading session (implemented)
+
+Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DST (EST/EDT). The interval is `[start, end)` on the local clock. Weekends use the same hours.
+
+- Encoded in `config/paper.yaml` → `session` so hours can be edited without code changes.
+- **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
+- Continuous `booked=0` trigger lines accumulate **only inside this window**, **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
+- Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). If drawdown ≥ `drawdown_halt_pct` (default 25%) or equity ≤ 180 USD, scanning halts (`SKIP drawdown_halt`) even while the session is open.
+
+## Daily scan quality
+
+Every `DAILY` line includes:
+
+- `below_floor_n`: count of scanned markets whose best post-fee + depth-walk per-share net edge is below the applicable floor (still counted).
+- `median_net_edge`: median of those same per-share net edges, **including** below-floor prints.
+
+UTC day window for fills; edge tape resets on UTC date rollover.
