@@ -64,6 +64,8 @@ class PaperConfig:
     idle_zero_fill_sessions: int = 2
     # Live ledger equity vs peak, every cycle including off-hours.
     drawdown_halt_pct: Decimal = Decimal("0.25")
+    # Ops hard floor from the merged docs note (PR #3).
+    drawdown_hard_floor_usd: Decimal = Decimal("180")
 
 
 def _d(value: Any) -> Decimal:
@@ -134,6 +136,8 @@ def _enforce_floors(cfg: PaperConfig) -> None:
         raise ConfigError("idle_zero_fill_sessions must be >= 1")
     if cfg.drawdown_halt_pct <= 0 or cfg.drawdown_halt_pct > 1:
         raise ConfigError("drawdown_halt_pct must be in (0, 1]")
+    if cfg.drawdown_hard_floor_usd <= 0:
+        raise ConfigError("drawdown_hard_floor_usd must be > 0")
     _enforce_session(cfg)
 
 
@@ -195,6 +199,7 @@ def load_config(path: str | Path | None = None) -> PaperConfig:
         session_end=str(session.get("end") or "22:00"),
         idle_zero_fill_sessions=max(1, int(session.get("idle_zero_fill_sessions", 2))),
         drawdown_halt_pct=_d(session.get("drawdown_halt_pct", "0.25")),
+        drawdown_hard_floor_usd=_d(session.get("drawdown_hard_floor_usd", "180")),
     )
     _enforce_floors(cfg)
     if cfg.poll_interval_seconds < 5:

@@ -165,6 +165,26 @@ def test_idle_zero_fill_trigger_after_two_sessions(tmp_path):
     assert any("TRIGGER idle_zero_fill" in line for line in second_close.messages)
 
 
+def test_drawdown_halt_uses_hard_floor(tmp_path):
+    # Starting equity is 200; a floor of 201 trips even when pct halt is loose.
+    cfg = paper_config(
+        tmp_path,
+        session_enabled=False,
+        drawdown_halt_pct=Decimal("0.90"),
+        drawdown_hard_floor_usd=Decimal("201"),
+    )
+    market = binary_market(yes_asks=[level("0.30", "20")], no_asks=[level("0.30", "20")])
+    stub = _StubMarket(market)
+    runner = PaperRunner(
+        cfg,
+        ledger=PaperLedger(cfg.ledger_path, cfg.starting_balance),
+        market=stub,  # type: ignore[arg-type]
+    )
+    report = runner.run_cycle()
+    assert report.skipped_reason == "drawdown_halt"
+    assert stub.list_calls == 0
+
+
 def test_drawdown_halt_uses_live_peak(tmp_path):
     cfg = paper_config(
         tmp_path,

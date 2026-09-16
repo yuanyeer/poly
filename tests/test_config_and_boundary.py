@@ -28,6 +28,7 @@ def test_load_default_config():
     assert cfg.session_end == "22:00"
     assert cfg.idle_zero_fill_sessions == 2
     assert cfg.drawdown_halt_pct == Decimal("0.25")
+    assert cfg.drawdown_hard_floor_usd == Decimal("180")
 
 
 def test_rejects_loosened_position_cap(tmp_path: Path):

@@ -97,14 +97,24 @@ def can_open(balance, event_exposure, open_opps, notional, event_id):
 
 Single local paper ledger; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
 
-## Trading session (FINAL — poly 负责人)
+## 旁注 / ops note (clocks & kill triggers)
+
+Paper-only operational stop/review notes. They do **not** change edge floors, fee formulas, or position gates above.
+
+1. **Trading window (ops finalized)** — Default window is **America/New_York 09:00–22:00** (follows DST; roughly **UTC 13:00–02:00**). **Not 24h.** China-local wall clock is **not** authoritative.
+
+2. **连续 24h booked=0** — Meter **cumulative time inside this trading window only**. Off-hours (scanner stopped / outside NY 09:00–22:00) do **not** count toward the 24h. In practice this is about two consecutive NY sessions of continuous `booked=0`. Calendar / China-local wall-clock days are not the meter.
+
+3. **Drawdown** — Live, real time: compare current paper ledger balance vs peak, with a hard floor of **180** USD. This trigger does **not** pause outside the trading window. The runner also halts scanning when live equity is `drawdown_halt_pct` (default 25%) below peak.
+
+## Trading session (implemented)
 
 Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DST (EST/EDT). The interval is `[start, end)` on the local clock. Weekends use the same hours.
 
 - Encoded in `config/paper.yaml` → `session` so hours can be edited without code changes.
 - **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
-- Continuous `booked=0` trigger lines accumulate **only inside this window**, **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00; a cancelled Shanghai draft used 23:00–10:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
-- Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). It is not a delayed end-of-day mark. If drawdown ≥ `drawdown_halt_pct` (default 25%), scanning halts (`SKIP drawdown_halt`) even while the session is open.
+- Continuous `booked=0` trigger lines accumulate **only inside this window**, **not** wall-clock 24h. Overnight idle from `end`→next `start` (NY 22:00–09:00) does **not** increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
+- Drawdown watches **live ledger equity vs peak** on every cycle, including off-hours (`(peak − equity) / peak`). If drawdown ≥ `drawdown_halt_pct` (default 25%) or equity ≤ 180 USD, scanning halts (`SKIP drawdown_halt`) even while the session is open.
 
 ## Daily scan quality
 

@@ -186,11 +186,12 @@ class PaperRunner:
                 drawdown=drawdown,
             )
 
-        if drawdown >= self.config.drawdown_halt_pct:
+        if drawdown >= self.config.drawdown_halt_pct or state.equity <= self.config.drawdown_hard_floor_usd:
             reason = "drawdown_halt"
             line = (
                 f"SKIP {reason} peak={self.watch.peak_equity:.4f} equity={state.equity:.4f} "
-                f"dd={drawdown:.4f} halt={self.config.drawdown_halt_pct}"
+                f"dd={drawdown:.4f} halt={self.config.drawdown_halt_pct} "
+                f"floor={self.config.drawdown_hard_floor_usd}"
             )
             messages.append(line)
             logger.info(line)
