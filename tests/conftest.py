@@ -29,6 +29,8 @@ def paper_config(tmp_path: Path | None = None, **overrides: object) -> PaperConf
         max_unhedged_inventory=Decimal("0"),
         assume_taker_only_if_fd_missing=True,
         min_fill_size=Decimal("1"),
+        # Unit tests pin the clock themselves; disable the live NY gate by default.
+        session_enabled=False,
     )
     values.update(overrides)
     if tmp_path is not None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
+from statistics import median
 
 from polybot.config import PaperConfig
 from polybot.types import LedgerFill, LedgerState
@@ -37,6 +38,26 @@ class SessionStats:
     rejected_edges: int = 0
     rejected_risk: int = 0
     snapshot_failures: int = 0
+    below_floor_n: int = 0
+    net_edges: list[Decimal] = field(default_factory=list)
+    _edge_day: str | None = None
+
+    def reset_daily_edges(self, day_key: str) -> None:
+        if self._edge_day != day_key:
+            self._edge_day = day_key
+            self.below_floor_n = 0
+            self.net_edges = []
+
+    def record_net_edge(self, edge: Decimal, floor: Decimal) -> None:
+        self.net_edges.append(edge)
+        if edge < floor:
+            self.below_floor_n += 1
+
+    @property
+    def median_net_edge(self) -> Decimal | None:
+        if not self.net_edges:
+            return None
+        return Decimal(str(median(self.net_edges)))
 
     def record_cycle(
         self,
@@ -69,6 +90,8 @@ class DailySnapshot:
     pnl: Decimal
     open_count: int
     open_exposure: Decimal
+    below_floor_n: int = 0
+    median_net_edge: Decimal | None = None
 
 
 def _fills_since(fills: list[LedgerFill], start: datetime) -> list[LedgerFill]:
@@ -91,8 +114,18 @@ def win_rate(fills: list[LedgerFill]) -> Decimal | None:
     return (Decimal(wins) / Decimal(len(fills))) * Decimal("100")
 
 
-def build_daily_snapshot(state: LedgerState, now: datetime | None = None) -> DailySnapshot:
+def build_daily_snapshot(
+    state: LedgerState,
+    now: datetime | None = None,
+    *,
+    below_floor_n: int = 0,
+    median_net_edge: Decimal | None = None,
+) -> DailySnapshot:
     current = now or utc_now()
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    else:
+        current = current.astimezone(timezone.utc)
     fills = daily_fills(state, current)
     locked_edge = sum((fill.expected_payout - fill.cash_debit for fill in fills), Decimal("0"))
     booked_notional = sum((fill.cash_debit for fill in fills), Decimal("0"))
@@ -107,6 +140,8 @@ def build_daily_snapshot(state: LedgerState, now: datetime | None = None) -> Dai
         pnl=state.equity - state.starting_balance,
         open_count=state.open_count,
         open_exposure=state.open_exposure,
+        below_floor_n=below_floor_n,
+        median_net_edge=median_net_edge,
     )
 
 
@@ -137,10 +172,12 @@ def format_summary(
 
 def format_daily(snapshot: DailySnapshot, config: PaperConfig) -> str:
     win_txt = f"{snapshot.win_rate:.1f}%" if snapshot.win_rate is not None else "n/a"
+    median_txt = f"{snapshot.median_net_edge:.4f}" if snapshot.median_net_edge is not None else "n/a"
     return (
         f"DAILY {snapshot.date} fills={snapshot.fills} "
         f"cash={snapshot.cash:.4f} equity={snapshot.equity:.4f} "
         f"pnl={snapshot.pnl:+.4f} locked_edge={snapshot.locked_edge:+.4f} "
         f"win_rate={win_txt} open={snapshot.open_count}/{config.max_concurrent_open} "
-        f"exposure={snapshot.open_exposure:.4f} booked_notional={snapshot.booked_notional:.4f}"
+        f"exposure={snapshot.open_exposure:.4f} booked_notional={snapshot.booked_notional:.4f} "
+        f"below_floor_n={snapshot.below_floor_n} median_net_edge={median_txt}"
     )

@@ -71,6 +71,8 @@ class ScanTarget:
     event_id: str
     question: str
     condition_ids: tuple[str, ...]
+    token_ids: tuple[str, ...] = ()
+    raw_edge: Decimal | None = None
 
 
 @dataclass(frozen=True)

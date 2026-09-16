@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from polybot.market.discover import (
     binary_targets,
     complete_set_targets_from_gamma_events,
     gamma_binary_ids,
+    live_binary_target,
     paginate_clob,
+    parse_ask_map,
+    rank_targets_by_raw_edge,
     rows_from_clob_payload,
+    select_walkable,
 )
+from polybot.types import ScanTarget
 
 
 def test_paginate_clob_merges_pages():
@@ -86,3 +93,41 @@ def test_complete_set_skips_oversized_neg_risk_event():
 def test_binary_targets_dedupe():
     targets = binary_targets(["0xa", "0xa", "0xb"])
     assert [t.event_id for t in targets] == ["0xa", "0xb"]
+
+
+def test_live_binary_target_requires_two_tokens():
+    row = {
+        "condition_id": "0xbin",
+        "active": True,
+        "closed": False,
+        "accepting_orders": True,
+        "question": "q",
+        "tokens": [{"token_id": "yes"}, {"token_id": "no"}],
+    }
+    target = live_binary_target(row)
+    assert target is not None
+    assert target.token_ids == ("yes", "no")
+    assert live_binary_target({**row, "closed": True}) is None
+
+
+def test_rank_and_select_walkable_skips_raw_below_floor():
+    asks = parse_ask_map({"y1": {"SELL": "0.40"}, "n1": "0.40", "y2": {"SELL": "0.52"}, "n2": "0.52"})
+    cheap = ScanTarget(
+        kind="binary",
+        event_id="cheap",
+        question="cheap",
+        condition_ids=("cheap",),
+        token_ids=("y1", "n1"),
+    )
+    rich = ScanTarget(
+        kind="binary",
+        event_id="rich",
+        question="rich",
+        condition_ids=("rich",),
+        token_ids=("y2", "n2"),
+    )
+    ranked = rank_targets_by_raw_edge([rich, cheap], asks)
+    assert ranked[0].event_id == "cheap"
+    assert ranked[0].raw_edge == Decimal("0.20")
+    walk = select_walkable(ranked, Decimal("0.005"), limit=10, skip_below_floor=True)
+    assert [item.event_id for item in walk] == ["cheap"]

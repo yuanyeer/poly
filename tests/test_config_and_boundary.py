@@ -22,6 +22,12 @@ def test_load_default_config():
     assert cfg.max_trade_notional_pct == Decimal("0.25")
     assert cfg.max_same_event_exposure_pct == Decimal("0.40")
     assert cfg.max_concurrent_open == 3
+    assert cfg.session_enabled is True
+    assert cfg.session_timezone == "America/New_York"
+    assert cfg.session_start == "09:00"
+    assert cfg.session_end == "22:00"
+    assert cfg.idle_zero_fill_sessions == 2
+    assert cfg.drawdown_halt_pct == Decimal("0.25")
 
 
 def test_rejects_loosened_position_cap(tmp_path: Path):
@@ -48,6 +54,16 @@ def test_rejects_too_fast_polling(tmp_path: Path):
     path = tmp_path / "fast.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(ConfigError, match="poll_interval_seconds"):
+        load_config(path)
+
+
+def test_rejects_24h_session_window(tmp_path: Path):
+    raw = yaml.safe_load(Path("config/paper.yaml").read_text(encoding="utf-8"))
+    raw["session"]["start"] = "00:00"
+    raw["session"]["end"] = "00:00"
+    path = tmp_path / "allday.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ConfigError, match="24h"):
         load_config(path)
 
 

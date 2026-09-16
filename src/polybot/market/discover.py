@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from decimal import Decimal
 from typing import Any, Iterable
 
 from polybot.types import ScanTarget
@@ -28,6 +29,15 @@ def _parse_maybe_json(value: Any) -> Any:
     return value
 
 
+def _dec(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def condition_id_from_row(row: Any) -> str | None:
     item = _as_dict(row)
     cid = item.get("condition_id") or item.get("conditionId") or item.get("id")
@@ -47,8 +57,8 @@ def rows_from_clob_payload(payload: Any) -> tuple[list[Any], str | None]:
     return [], None
 
 
-def paginate_clob(fetch, pages: int) -> list[str]:
-    ids: list[str] = []
+def paginate_clob_rows(fetch, pages: int) -> list[dict[str, Any]]:
+    rows_out: list[dict[str, Any]] = []
     cursor = "MA=="
     for _ in range(max(1, pages)):
         try:
@@ -64,13 +74,121 @@ def paginate_clob(fetch, pages: int) -> list[str]:
             break
         rows, next_cursor = rows_from_clob_payload(payload)
         for row in rows:
-            cid = condition_id_from_row(row)
-            if cid:
-                ids.append(cid)
+            if isinstance(row, dict):
+                rows_out.append(row)
         if not next_cursor or next_cursor in END_CURSORS:
             break
         cursor = next_cursor
+    return rows_out
+
+
+def paginate_clob(fetch, pages: int) -> list[str]:
+    ids: list[str] = []
+    for row in paginate_clob_rows(fetch, pages):
+        cid = condition_id_from_row(row)
+        if cid:
+            ids.append(cid)
     return ids
+
+
+def token_ids_from_clob_row(row: dict[str, Any]) -> tuple[str, ...]:
+    tokens = row.get("tokens") or row.get("t") or []
+    ids: list[str] = []
+    for token in tokens:
+        item = token if isinstance(token, dict) else {}
+        tid = item.get("token_id") or item.get("t")
+        if tid:
+            ids.append(str(tid))
+    return tuple(ids)
+
+
+def live_binary_target(row: dict[str, Any]) -> ScanTarget | None:
+    if row.get("closed") is True or row.get("active") is False:
+        return None
+    if row.get("accepting_orders") is False or row.get("acceptingOrders") is False:
+        return None
+    cid = condition_id_from_row(row)
+    token_ids = token_ids_from_clob_row(row)
+    if not cid or len(token_ids) != 2:
+        return None
+    question = str(row.get("question") or cid)
+    return ScanTarget(
+        kind="binary",
+        event_id=cid,
+        question=question,
+        condition_ids=(cid,),
+        token_ids=token_ids,
+    )
+
+
+def parse_ask_map(payload: Any) -> dict[str, Decimal]:
+    """Normalize get_prices() payload to token_id -> best ask."""
+    if not isinstance(payload, dict):
+        return {}
+    out: dict[str, Decimal] = {}
+    for token_id, node in payload.items():
+        raw = None
+        if isinstance(node, dict):
+            raw = node.get("SELL") or node.get("sell") or node.get("ASK") or node.get("ask")
+        else:
+            raw = node
+        price = _dec(raw)
+        if price is not None:
+            out[str(token_id)] = price
+    return out
+
+
+def raw_taker_edge(token_ids: Iterable[str], asks: dict[str, Decimal]) -> Decimal | None:
+    prices: list[Decimal] = []
+    for token_id in token_ids:
+        price = asks.get(token_id)
+        if price is None:
+            return None
+        prices.append(price)
+    if not prices:
+        return None
+    return Decimal("1") - sum(prices, Decimal("0"))
+
+
+def rank_targets_by_raw_edge(
+    targets: Iterable[ScanTarget],
+    asks: dict[str, Decimal],
+) -> list[ScanTarget]:
+    scored: list[ScanTarget] = []
+    for target in targets:
+        if not target.token_ids:
+            scored.append(target)
+            continue
+        raw = raw_taker_edge(target.token_ids, asks)
+        scored.append(
+            ScanTarget(
+                kind=target.kind,
+                event_id=target.event_id,
+                question=target.question,
+                condition_ids=target.condition_ids,
+                token_ids=target.token_ids,
+                raw_edge=raw,
+            )
+        )
+    scored.sort(key=lambda item: item.raw_edge if item.raw_edge is not None else Decimal("-99"), reverse=True)
+    return scored
+
+
+def select_walkable(
+    targets: list[ScanTarget],
+    floor: Decimal,
+    *,
+    limit: int,
+    skip_below_floor: bool,
+) -> list[ScanTarget]:
+    if not skip_below_floor:
+        return targets[:limit]
+    hits = [
+        target
+        for target in targets
+        if target.raw_edge is not None and target.raw_edge >= floor
+    ]
+    return hits[:limit]
 
 
 def binary_targets(condition_ids: Iterable[str], questions: dict[str, str] | None = None) -> list[ScanTarget]:
@@ -92,37 +210,60 @@ def binary_targets(condition_ids: Iterable[str], questions: dict[str, str] | Non
     return targets
 
 
+def yes_token_id(market: dict[str, Any]) -> str | None:
+    tokens = _parse_maybe_json(market.get("clobTokenIds") or market.get("tokens"))
+    outcomes = _parse_maybe_json(market.get("outcomes"))
+    if not isinstance(tokens, list) or not tokens:
+        return None
+    idx = 0
+    if isinstance(outcomes, list):
+        for i, label in enumerate(outcomes):
+            if str(label).strip().lower() == "yes":
+                idx = i
+                break
+    if idx >= len(tokens):
+        return None
+    token = tokens[idx]
+    if isinstance(token, dict):
+        tid = token.get("token_id") or token.get("t")
+        return str(tid) if tid else None
+    return str(token)
+
+
 def complete_set_targets_from_gamma_events(
     events: Any,
     limit: int,
     max_outcomes: int = 12,
 ) -> list[ScanTarget]:
-    if not isinstance(events, list):
+    if not isinstance(events, list) or limit <= 0:
         return []
     targets: list[ScanTarget] = []
+    collect_cap = max(limit * 8, limit)
     for event in events:
-        if len(targets) >= limit:
+        if len(targets) >= collect_cap:
             break
         if not isinstance(event, dict):
             continue
         if event.get("closed") is True or event.get("active") is False:
             continue
-        # Neg-risk events are the mutually exclusive exhaustive complete sets.
         if event.get("enableNegRisk") is not True:
             continue
         markets = event.get("markets") or []
         if not isinstance(markets, list):
             continue
         condition_ids: list[str] = []
+        yes_tokens: list[str] = []
         for market in markets:
             if not isinstance(market, dict):
                 continue
             if market.get("acceptingOrders") is False or market.get("closed") is True:
                 continue
             cid = condition_id_from_row(market)
+            token = yes_token_id(market)
             if cid:
                 condition_ids.append(cid)
-        # Skip huge fields (e.g. 100+ nominee markets) — subsetting would omit outcomes.
+            if token:
+                yes_tokens.append(token)
         if len(condition_ids) < 3 or len(condition_ids) > max_outcomes:
             continue
         event_id = str(event.get("id") or event.get("slug") or condition_ids[0])
@@ -133,17 +274,18 @@ def complete_set_targets_from_gamma_events(
                 event_id=f"event:{event_id}",
                 question=title,
                 condition_ids=tuple(condition_ids),
+                token_ids=tuple(yes_tokens) if len(yes_tokens) == len(condition_ids) else (),
             )
         )
     return targets
 
 
-def gamma_binary_ids(rows: Any) -> list[str]:
+def gamma_binary_targets(rows: Any) -> list[ScanTarget]:
     if isinstance(rows, dict):
         rows = rows.get("data") or rows.get("markets") or []
     if not isinstance(rows, list):
         return []
-    ids: list[str] = []
+    targets: list[ScanTarget] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -153,6 +295,22 @@ def gamma_binary_ids(rows: Any) -> list[str]:
         if isinstance(outcomes, list) and len(outcomes) != 2:
             continue
         cid = condition_id_from_row(row)
+        tokens = _parse_maybe_json(row.get("clobTokenIds"))
+        token_ids: tuple[str, ...] = ()
+        if isinstance(tokens, list) and len(tokens) == 2:
+            token_ids = tuple(str(t) for t in tokens)
         if cid:
-            ids.append(cid)
-    return ids
+            targets.append(
+                ScanTarget(
+                    kind="binary",
+                    event_id=cid,
+                    question=str(row.get("question") or cid),
+                    condition_ids=(cid,),
+                    token_ids=token_ids,
+                )
+            )
+    return targets
+
+
+def gamma_binary_ids(rows: Any) -> list[str]:
+    return [target.event_id for target in gamma_binary_targets(rows)]

@@ -11,8 +11,12 @@ from polybot.config import PaperConfig
 from polybot.market.discover import (
     binary_targets,
     complete_set_targets_from_gamma_events,
-    gamma_binary_ids,
-    paginate_clob,
+    gamma_binary_targets,
+    live_binary_target,
+    paginate_clob_rows,
+    parse_ask_map,
+    rank_targets_by_raw_edge,
+    select_walkable,
 )
 from polybot.types import BookLevel, FeeSchedule, MarketSnapshot, OutcomeBook, ScanTarget
 
@@ -114,13 +118,7 @@ class PaperMarketClient:
         if self.config.condition_ids:
             return binary_targets(self.config.condition_ids)[: self.config.max_markets]
 
-        condition_ids: list[str] = []
-        condition_ids.extend(self._from_clob("get_sampling_markets"))
-        condition_ids.extend(self._from_clob("get_markets"))
-        if self.config.include_gamma:
-            condition_ids.extend(self._gamma_binary_ids())
-
-        binaries = binary_targets(condition_ids)[: self.config.max_markets]
+        binaries = self._live_binaries()
         groups: list[ScanTarget] = []
         if self.config.include_gamma and self.config.max_complete_set_events:
             groups = complete_set_targets_from_gamma_events(
@@ -128,16 +126,49 @@ class PaperMarketClient:
                 self.config.max_complete_set_events,
                 max_outcomes=self.config.max_complete_set_outcomes,
             )
+        asks = self._batch_asks([token for target in binaries + groups for token in target.token_ids])
+        binaries = rank_targets_by_raw_edge(binaries, asks)
+        groups = rank_targets_by_raw_edge(groups, asks)
+        walk_binaries = select_walkable(
+            binaries,
+            self.config.taker_edge_floor,
+            limit=self.config.max_markets,
+            skip_below_floor=self.config.skip_walk_if_raw_below_floor,
+        )
+        walk_groups = select_walkable(
+            groups,
+            self.config.taker_edge_floor,
+            limit=self.config.max_complete_set_events,
+            skip_below_floor=self.config.skip_walk_if_raw_below_floor,
+        )
+        best_bin = binaries[0].raw_edge if binaries else None
+        best_grp = groups[0].raw_edge if groups else None
         logger.info(
-            "discover binaries=%s complete_set_events=%s (cap %s/%s)",
+            "SCREEN binaries=%s complete_sets=%s taker_hits=%s/%s best_binary=%s best_set=%s walking=%s+%s",
             len(binaries),
             len(groups),
-            self.config.max_markets,
-            self.config.max_complete_set_events,
+            sum(1 for item in binaries if item.raw_edge is not None and item.raw_edge >= self.config.taker_edge_floor),
+            sum(1 for item in groups if item.raw_edge is not None and item.raw_edge >= self.config.taker_edge_floor),
+            best_bin,
+            best_grp,
+            len(walk_binaries),
+            len(walk_groups),
         )
-        return binaries + groups
+        return walk_binaries + walk_groups
 
-    def _from_clob(self, method_name: str) -> list[str]:
+    def _live_binaries(self) -> list[ScanTarget]:
+        rows = self._from_clob_rows("get_sampling_markets")
+        found: dict[str, ScanTarget] = {}
+        for row in rows:
+            target = live_binary_target(row)
+            if target:
+                found[target.event_id] = target
+        if self.config.include_gamma:
+            for target in gamma_binary_targets(self._gamma_binary_rows()):
+                found.setdefault(target.event_id, target)
+        return list(found.values())
+
+    def _from_clob_rows(self, method_name: str) -> list[dict[str, Any]]:
         method = getattr(self._clob, method_name, None)
         if method is None:
             return []
@@ -145,7 +176,35 @@ class PaperMarketClient:
         def fetch(cursor: str):
             return method(next_cursor=cursor)
 
-        return paginate_clob(fetch, self.config.clob_pages)
+        return paginate_clob_rows(fetch, self.config.clob_pages)
+
+    def _batch_asks(self, token_ids: list[str]) -> dict[str, Decimal]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for token_id in token_ids:
+            if token_id and token_id not in seen:
+                seen.add(token_id)
+                unique.append(token_id)
+        if not unique:
+            return {}
+        try:
+            from py_clob_client_v2 import BookParams
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BookParams unavailable: %s", exc)
+            return {}
+        asks: dict[str, Decimal] = {}
+        chunk_size = 120
+        for i in range(0, len(unique), chunk_size):
+            chunk = unique[i : i + chunk_size]
+            try:
+                payload = self._clob.get_prices(
+                    [BookParams(token_id=token_id, side="SELL") for token_id in chunk]
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("get_prices failed: %s", exc)
+                continue
+            asks.update(parse_ask_map(payload))
+        return asks
 
     def _gamma_get(self, path: str, params: dict[str, str]) -> Any:
         url = f"{self.config.gamma_host}{path}"
@@ -158,18 +217,17 @@ class PaperMarketClient:
             logger.warning("Gamma %s failed: %s", path, exc)
             return None
 
-    def _gamma_binary_ids(self) -> list[str]:
-        rows = self._gamma_get(
+    def _gamma_binary_rows(self) -> Any:
+        return self._gamma_get(
             "/markets",
             {
                 "active": "true",
                 "closed": "false",
                 "order": "volume24hr",
                 "ascending": "false",
-                "limit": str(min(100, max(self.config.max_markets, 20))),
+                "limit": "80",
             },
         )
-        return gamma_binary_ids(rows)
 
     def _gamma_events(self) -> list[Any]:
         rows = self._gamma_get(
@@ -179,7 +237,7 @@ class PaperMarketClient:
                 "closed": "false",
                 "order": "volume24hr",
                 "ascending": "false",
-                "limit": str(min(50, max(self.config.max_complete_set_events * 2, 10))),
+                "limit": "80",
             },
         )
         if isinstance(rows, list):

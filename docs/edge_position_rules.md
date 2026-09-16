@@ -96,3 +96,21 @@ def can_open(balance, event_exposure, open_opps, notional, event_id):
 ## Ledger
 
 Single local paper ledger; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
+
+## Trading session (FINAL — poly 负责人)
+
+Default window is **America/New_York 09:00–22:00 local**. `zoneinfo` honors DST (EST/EDT). The interval is `[start, end)` on the local clock. Weekends use the same hours.
+
+- Encoded in `config/paper.yaml` → `session` so hours can be edited without code changes.
+- **Not 24h trading.** Outside the window `poly-paper --loop` must stop scanning (idle / sleep; log `SKIP session_closed`).
+- Continuous `booked=0` trigger lines accumulate **only inside this window**. Overnight idle (22:00–09:00) does not increment the streak. After `idle_zero_fill_sessions` (default 2) in-window sessions with zero books, log `TRIGGER idle_zero_fill`.
+- Drawdown watches **live ledger equity vs peak** in real time (`(peak − equity) / peak`). It is not a delayed end-of-day mark. If drawdown ≥ `drawdown_halt_pct` (default 25%), scanning halts (`SKIP drawdown_halt`) even while the session is open.
+
+## Daily scan quality
+
+Every `DAILY` line includes:
+
+- `below_floor_n`: count of scanned markets whose best post-fee + depth-walk per-share net edge is below the applicable floor (still counted).
+- `median_net_edge`: median of those same per-share net edges, **including** below-floor prints.
+
+UTC day window for fills; edge tape resets on UTC date rollover.

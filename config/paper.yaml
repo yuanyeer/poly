@@ -16,12 +16,14 @@ endpoints:
 scan:
   max_markets: 36
   poll_interval_seconds: 20
-  clob_pages: 2
+  clob_pages: 3
   include_gamma: true
   max_complete_set_events: 10
   max_complete_set_outcomes: 12
   size_probe_steps: 8
   summary_every_cycles: 1
+  # Screen many books with batch asks; only walk when 1-Σbest_ask can clear the floor.
+  skip_walk_if_raw_below_floor: true
   # Optional explicit condition IDs. Empty = discover via CLOB/Gamma.
   condition_ids: []
 
@@ -43,3 +45,16 @@ fees:
   assume_taker_only_if_fd_missing: true
 
 min_fill_size: 1
+
+# FINAL trading window from poly 负责人.
+# Local wall clock in America/New_York; ZoneInfo honors DST (EST/EDT).
+# Outside [start, end) the loop stops scanning. Not 24h trading.
+# booked=0 streak accumulates only while this window is open.
+# Drawdown watches live ledger equity vs peak (not a delayed EOD mark).
+session:
+  enabled: true
+  timezone: America/New_York
+  start: "09:00"
+  end: "22:00"
+  idle_zero_fill_sessions: 2
+  drawdown_halt_pct: 0.25

@@ -3,18 +3,23 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Callable
 
 from polybot.config import PaperConfig
 from polybot.ledger.store import PaperLedger
 from polybot.market.client import LiveOrderForbidden, PaperMarketClient
 from polybot.risk.gates import RiskEngine
-from polybot.runner.summary import SessionStats, build_daily_snapshot, format_daily, format_summary
+from polybot.runner.summary import SessionStats, build_daily_snapshot, format_daily, format_summary, utc_now
+from polybot.session import in_trading_window, local_now, session_label
 from polybot.strategy import default_strategies
 from polybot.strategy.sizer import resize_to_book
 from polybot.types import LedgerState, MarketSnapshot, Opportunity, ScanTarget
 
 logger = logging.getLogger(__name__)
+
+NowFn = Callable[[], datetime]
 
 
 @dataclass
@@ -29,6 +34,56 @@ class CycleReport:
     messages: list[str]
     summary: str = ""
     daily_summary: str = ""
+    skipped_reason: str = ""
+    in_session: bool = True
+    zero_book_cycles: int = 0
+    zero_fill_sessions: int = 0
+    peak_equity: Decimal = Decimal("0")
+    drawdown: Decimal = Decimal("0")
+
+
+@dataclass
+class SessionWatch:
+    """In-window booked=0 streak + live peak/drawdown. Off-hours do not advance the streak."""
+
+    peak_equity: Decimal = Decimal("0")
+    zero_book_cycles: int = 0
+    zero_fill_sessions: int = 0
+    session_booked: int = 0
+    session_scanned: bool = False
+    in_window_prev: bool = False
+
+    def observe_equity(self, equity: Decimal) -> Decimal:
+        if equity > self.peak_equity:
+            self.peak_equity = equity
+        if self.peak_equity <= 0:
+            return Decimal("0")
+        return (self.peak_equity - equity) / self.peak_equity
+
+    def note_in_window(self, booked: int, did_scan: bool) -> None:
+        if did_scan:
+            self.session_scanned = True
+            self.session_booked += booked
+            if booked == 0:
+                self.zero_book_cycles += 1
+            else:
+                self.zero_book_cycles = 0
+                self.zero_fill_sessions = 0
+        self.in_window_prev = True
+
+    def note_off_window(self, idle_sessions: int) -> bool:
+        """Close a session on in→out transition. Returns True if idle trigger fires."""
+        triggered = False
+        if self.in_window_prev:
+            if self.session_scanned and self.session_booked == 0:
+                self.zero_fill_sessions += 1
+                triggered = self.zero_fill_sessions >= idle_sessions
+            elif self.session_booked > 0:
+                self.zero_fill_sessions = 0
+            self.session_booked = 0
+            self.session_scanned = False
+        self.in_window_prev = False
+        return triggered
 
 
 class PaperRunner:
@@ -37,6 +92,7 @@ class PaperRunner:
         config: PaperConfig,
         ledger: PaperLedger | None = None,
         market: PaperMarketClient | None = None,
+        now_fn: NowFn | None = None,
     ) -> None:
         if config.mode != "paper":
             raise LiveOrderForbidden("runner only accepts paper mode")
@@ -46,7 +102,9 @@ class PaperRunner:
         self.risk = RiskEngine(config)
         self.strategies = default_strategies()
         self.stats = SessionStats()
+        self.watch = SessionWatch()
         self._day_key: str | None = None
+        self._now = now_fn or utc_now
 
     def status_line(self, state: LedgerState) -> str:
         progress = (state.equity / self.config.target_balance) * Decimal("100")
@@ -71,23 +129,83 @@ class PaperRunner:
             logger.info("paper loop stopped by operator")
             if last is None:
                 state = self.ledger.state()
-                last = CycleReport(
-                    scanned=0,
-                    candidates=0,
-                    booked=0,
-                    skipped=0,
-                    rejected_edges=0,
-                    rejected_risk=0,
-                    state=state,
-                    messages=["interrupted before first cycle"],
-                    summary=format_summary("SUMMARY", self.config, state, self.stats),
-                    daily_summary=format_daily(build_daily_snapshot(state), self.config),
-                )
+                last = self._empty_report(state, "interrupted before first cycle")
             return last
 
     def run_cycle(self) -> CycleReport:
+        now = self._now()
+        utc = now.astimezone(timezone.utc) if now.tzinfo else now.replace(tzinfo=timezone.utc)
+        self.stats.reset_daily_edges(utc.date().isoformat())
         state = self.ledger.state()
+        drawdown = self.watch.observe_equity(state.equity)
         messages = [self.status_line(state)]
+        in_window = in_trading_window(
+            self.config.session_timezone,
+            self.config.session_start,
+            self.config.session_end,
+            now,
+            enabled=self.config.session_enabled,
+        )
+        window = session_label(
+            self.config.session_timezone,
+            self.config.session_start,
+            self.config.session_end,
+        )
+        local = local_now(self.config.session_timezone, now)
+
+        if not in_window:
+            triggered = self.watch.note_off_window(self.config.idle_zero_fill_sessions)
+            reason = "session_closed"
+            local_txt = local.strftime("%Y-%m-%d %H:%M")
+            line = f"SKIP {reason} tz={self.config.session_timezone} local={local_txt} window={window} (no scan)"
+            messages.append(line)
+            logger.info(line)
+            if triggered:
+                trig = (
+                    f"TRIGGER idle_zero_fill sessions={self.watch.zero_fill_sessions} "
+                    f"(booked=0 counted only inside {window})"
+                )
+                messages.append(trig)
+                logger.info(trig)
+            return self._finish_cycle(
+                state=state,
+                messages=messages,
+                scanned=0,
+                candidates=0,
+                booked=0,
+                skipped=1,
+                rejected_edges=0,
+                rejected_risk=0,
+                skipped_reason=reason,
+                in_session=False,
+                now=now,
+                drawdown=drawdown,
+            )
+
+        if drawdown >= self.config.drawdown_halt_pct:
+            reason = "drawdown_halt"
+            line = (
+                f"SKIP {reason} peak={self.watch.peak_equity:.4f} equity={state.equity:.4f} "
+                f"dd={drawdown:.4f} halt={self.config.drawdown_halt_pct}"
+            )
+            messages.append(line)
+            logger.info(line)
+            self.watch.note_in_window(booked=0, did_scan=False)
+            return self._finish_cycle(
+                state=state,
+                messages=messages,
+                scanned=0,
+                candidates=0,
+                booked=0,
+                skipped=1,
+                rejected_edges=0,
+                rejected_risk=0,
+                skipped_reason=reason,
+                in_session=True,
+                now=now,
+                drawdown=drawdown,
+            )
+
         targets = self._targets()
         booked = 0
         skipped = 0
@@ -114,6 +232,7 @@ class PaperRunner:
                 len(snapshot.outcomes),
                 snapshot.question[:80],
             )
+            self._record_market_edge(snapshot)
             found = self._scan_market(snapshot)
             if not found:
                 rejected_edges += 1
@@ -126,6 +245,7 @@ class PaperRunner:
                 if accepted:
                     booked += 1
                     state = self.ledger.state()
+                    drawdown = self.watch.observe_equity(state.equity)
                     line = (
                         f"BOOK {accepted.strategy} {snapshot.question[:80]} "
                         f"edge={accepted.edge:.4f} size={accepted.size} notional={accepted.notional:.4f}"
@@ -143,10 +263,75 @@ class PaperRunner:
             rejected_risk=rejected_risk,
             snapshot_failures=snapshot_failures,
         )
+        self.watch.note_in_window(booked=booked, did_scan=True)
+        if booked == 0:
+            idle = (
+                f"IDLE booked=0 streak_cycles={self.watch.zero_book_cycles} "
+                f"streak_sessions={self.watch.zero_fill_sessions} window={window}"
+            )
+            messages.append(idle)
+            logger.info(idle)
         state = self.ledger.state()
+        drawdown = self.watch.observe_equity(state.equity)
+        return self._finish_cycle(
+            state=state,
+            messages=messages,
+            scanned=scanned,
+            candidates=candidates,
+            booked=booked,
+            skipped=skipped,
+            rejected_edges=rejected_edges,
+            rejected_risk=rejected_risk,
+            skipped_reason="",
+            in_session=True,
+            now=now,
+            drawdown=drawdown,
+        )
+
+    def _empty_report(self, state: LedgerState, message: str) -> CycleReport:
+        now = self._now()
+        daily_snap = self._daily_snapshot(state, now)
+        return CycleReport(
+            scanned=0,
+            candidates=0,
+            booked=0,
+            skipped=0,
+            rejected_edges=0,
+            rejected_risk=0,
+            state=state,
+            messages=[message],
+            summary=format_summary("SUMMARY", self.config, state, self.stats),
+            daily_summary=format_daily(daily_snap, self.config),
+            peak_equity=self.watch.peak_equity,
+        )
+
+    def _daily_snapshot(self, state: LedgerState, now: datetime):
+        return build_daily_snapshot(
+            state,
+            now,
+            below_floor_n=self.stats.below_floor_n,
+            median_net_edge=self.stats.median_net_edge,
+        )
+
+    def _finish_cycle(
+        self,
+        *,
+        state: LedgerState,
+        messages: list[str],
+        scanned: int,
+        candidates: int,
+        booked: int,
+        skipped: int,
+        rejected_edges: int,
+        rejected_risk: int,
+        skipped_reason: str,
+        in_session: bool,
+        now: datetime,
+        drawdown: Decimal,
+    ) -> CycleReport:
         messages.append(self.status_line(state))
         summary = format_summary("SUMMARY", self.config, state, self.stats)
-        daily_snap = build_daily_snapshot(state)
+        daily_snap = self._daily_snapshot(state, now)
         daily = format_daily(daily_snap, self.config)
         day_key = daily_snap.date
         if self._day_key is None:
@@ -154,7 +339,7 @@ class PaperRunner:
         elif day_key != self._day_key:
             logger.info("DAILY close %s — rolling to %s", self._day_key, day_key)
             self._day_key = day_key
-        if self.stats.cycles % self.config.summary_every_cycles == 0:
+        if self.stats.cycles % self.config.summary_every_cycles == 0 or skipped_reason:
             messages.append(summary)
             messages.append(daily)
             logger.info(summary)
@@ -170,7 +355,37 @@ class PaperRunner:
             messages=messages,
             summary=summary,
             daily_summary=daily,
+            skipped_reason=skipped_reason,
+            in_session=in_session,
+            zero_book_cycles=self.watch.zero_book_cycles,
+            zero_fill_sessions=self.watch.zero_fill_sessions,
+            peak_equity=self.watch.peak_equity,
+            drawdown=drawdown,
         )
+
+    def _record_market_edge(self, snapshot: MarketSnapshot) -> None:
+        best: tuple[Decimal, Decimal] | None = None
+        for strategy in self.strategies:
+            preview = getattr(strategy, "preview_edge", None)
+            if preview is None:
+                continue
+            try:
+                edge = preview(snapshot, self.config)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("preview_edge %s failed: %s", strategy.name, exc)
+                continue
+            if edge is None or edge <= Decimal("-1"):
+                continue
+            floor = (
+                self.config.maker_edge_floor
+                if strategy.name == "maker_spread"
+                else self.config.taker_edge_floor
+            )
+            if best is None or edge > best[0]:
+                best = (edge, floor)
+        if best is None:
+            return
+        self.stats.record_net_edge(best[0], best[1])
 
     def _targets(self) -> list[ScanTarget]:
         if hasattr(self.market, "list_scan_targets"):
