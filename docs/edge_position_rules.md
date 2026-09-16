@@ -96,3 +96,13 @@ def can_open(balance, event_exposure, open_opps, notional, event_id):
 ## Ledger
 
 Single local paper ledger; every fill: cash/position/PnL update from walked price + fee + modeled slippage only.
+
+## 旁注 / ops note (clocks & kill triggers)
+
+Paper-only operational stop/review notes. They do **not** change edge floors, fee formulas, or position gates above.
+
+1. **连续 24h booked=0** — Meter **cumulative configured-trading-window time only**. Off-hours when the scanner is stopped do **not** count toward the 24h. In practice this is about two consecutive trading sessions of continuous `booked=0`. Calendar / wall-clock days are not the meter.
+
+2. **Drawdown** — Still live, real time: compare current paper ledger balance vs peak, with a hard floor of **180** USD. This trigger does **not** pause outside the trading window.
+
+3. **Trading window** — Set by ops (poly 负责人) to crypto-active hours. This doc only refers to the **configured trading window**. China-local wall clock is **not** the authority for when the scanner is on or when the 24h booked=0 meter runs.
