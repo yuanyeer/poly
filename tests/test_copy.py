@@ -8,7 +8,12 @@ import yaml
 
 from polybot import COPY_MAX_CHASE, COPY_MAX_SLEEVE_PCT, COPY_STOP_PATH_DD, COPY_STOP_PEAK_DD
 from polybot.config import ConfigError, CopyConfig, load_config
-from polybot.copy.executor import MirrorExecutor, MirrorIntent, chase_slippage
+from polybot.copy.executor import (
+    MirrorExecutor,
+    MirrorIntent,
+    chase_slippage,
+    validate_v1_mirror_chase,
+)
 from polybot.copy.metrics import InMemoryMetricsProvider, JsonFileMetricsProvider, LeaderMetrics
 from polybot.copy.monitor import EVENT_RESCAN_NEEDED, EVENT_STOP_FOLLOW, CopyMonitor, stop_follow_reason
 from polybot.copy.rescan import LoggingRescanHook, RescanCriteria, filter_candidates
@@ -328,6 +333,31 @@ def test_mirror_still_respects_same_event_and_concurrent():
     concurrent = exe.evaluate(_intent(notional=Decimal("20")), _state(open_count=3))
     assert not concurrent.allowed
     assert "concurrent" in concurrent.reason
+
+
+def test_v1_validator_requires_delay_walk_fee_then_abandons_over_one_cent():
+    """after delay Δt, walk book; fill_px=VWAP; fee per fd; >1¢ → abandon, no copy."""
+    ready = _intent(
+        delay_seconds=Decimal("2"),
+        depth_walked=True,
+        fees_applied=True,
+        leader_px=Decimal("0.50"),
+        fill_px=Decimal("0.50"),
+        fee_per_share=Decimal("0.001"),
+    )
+    assert validate_v1_mirror_chase(ready) is None
+    assert validate_v1_mirror_chase(_intent(delay_seconds=None)) is not None
+    assert validate_v1_mirror_chase(_intent(depth_walked=False)) is not None
+    assert validate_v1_mirror_chase(_intent(fees_applied=False)) is not None
+    # |0.51 − 0.50| + 0.002 = 0.012 > 0.01 → abandon
+    over = _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.51"), fee_per_share=Decimal("0.002"))
+    reason = validate_v1_mirror_chase(over)
+    assert reason is not None
+    assert "abandon" in reason
+    assert "do not copy" in reason
+    # Exactly 1¢ is still copyable
+    at_cap = _intent(leader_px=Decimal("0.50"), fill_px=Decimal("0.505"), fee_per_share=Decimal("0.005"))
+    assert validate_v1_mirror_chase(at_cap) is None
 
 
 def test_chase_slippage_formula():

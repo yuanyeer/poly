@@ -3,7 +3,13 @@
 No live wallet scraper. No fabricated fills. No CLOB orders.
 """
 
-from polybot.copy.executor import MirrorDecision, MirrorExecutor, MirrorIntent, chase_slippage
+from polybot.copy.executor import (
+    MirrorDecision,
+    MirrorExecutor,
+    MirrorIntent,
+    chase_slippage,
+    validate_v1_mirror_chase,
+)
 from polybot.copy.metrics import (
     InMemoryMetricsProvider,
     JsonFileMetricsProvider,
@@ -46,4 +52,5 @@ __all__ = [
     "filter_candidates",
     "load_watchlist",
     "stop_follow_reason",
+    "validate_v1_mirror_chase",
 ]

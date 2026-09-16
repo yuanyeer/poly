@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from decimal import Decimal
 
+from polybot import COPY_MAX_CHASE
 from polybot.config import CopyConfig, PaperConfig
 from polybot.risk.gates import RiskEngine
 from polybot.types import LedgerState, RiskDecision
@@ -16,6 +17,36 @@ ZERO = Decimal("0")
 def chase_slippage(fill_px: Decimal, leader_px: Decimal, fee_per_share: Decimal) -> Decimal:
     """|fill_px − leader_px| + fee/share after delay + depth walk (算法 v1)."""
     return abs(fill_px - leader_px) + fee_per_share
+
+
+def validate_v1_mirror_chase(
+    intent: MirrorIntent,
+    *,
+    max_chase: Decimal | None = None,
+) -> str | None:
+    """算法 v1 chase validator. Return abandon reason, or None if the gate passes.
+
+    After delay Δt, walk our book; fill_px = VWAP(depth); fee per fd.
+    Abandon (do not copy) if ``|fill_px − leader_px| + fee/share > 0.01`` (1¢).
+    """
+    cap = max_chase if max_chase is not None else Decimal(COPY_MAX_CHASE)
+    if intent.delay_seconds is None:
+        return "mirror requires observed delay vs leader fill"
+    if intent.delay_seconds < ZERO:
+        return "mirror delay cannot be negative"
+    if not intent.depth_walked:
+        return "mirror requires depth walk (never top-of-book only)"
+    if not intent.fees_applied:
+        return "mirror requires fees applied (fd.r / fd.to)"
+    if intent.leader_px is None or intent.fill_px is None or intent.fee_per_share is None:
+        return "mirror requires leader_px, fill_px (depth VWAP), and fee/share for chase cap"
+    chase = chase_slippage(intent.fill_px, intent.leader_px, intent.fee_per_share)
+    if chase > cap:
+        return (
+            f"chase slippage {chase} > {cap} "
+            f"(|fill_px-leader_px|+fee/share; abandon fill, do not copy)"
+        )
+    return None
 
 
 @dataclass(frozen=True)
@@ -80,28 +111,9 @@ class MirrorExecutor:
     ) -> MirrorDecision:
         if self.copy is None or not self.copy.enabled:
             return MirrorDecision(False, "copy-trading observation is disabled")
-        if intent.delay_seconds is None:
-            return MirrorDecision(False, "mirror requires observed delay vs leader fill")
-        if intent.delay_seconds < ZERO:
-            return MirrorDecision(False, "mirror delay cannot be negative")
-        if not intent.depth_walked:
-            return MirrorDecision(False, "mirror requires depth walk (never top-of-book only)")
-        if not intent.fees_applied:
-            return MirrorDecision(False, "mirror requires fees applied (fd.r / fd.to)")
-        if intent.leader_px is None or intent.fill_px is None or intent.fee_per_share is None:
-            return MirrorDecision(
-                False,
-                "mirror requires leader_px, fill_px (depth VWAP), and fee/share for chase cap",
-            )
-        chase = chase_slippage(intent.fill_px, intent.leader_px, intent.fee_per_share)
-        if chase > self.copy.max_chase_slippage:
-            return MirrorDecision(
-                False,
-                (
-                    f"chase slippage {chase} > {self.copy.max_chase_slippage} "
-                    f"(|fill_px-leader_px|+fee/share; abandon fill, do not copy)"
-                ),
-            )
+        chase_reason = validate_v1_mirror_chase(intent, max_chase=self.copy.max_chase_slippage)
+        if chase_reason:
+            return MirrorDecision(False, chase_reason)
         if intent.notional <= ZERO or intent.size <= ZERO:
             return MirrorDecision(False, "mirror notional/size must be positive")
         if not intent.event_id:
